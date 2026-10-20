@@ -2,11 +2,12 @@ import { existsSync } from 'node:fs';
 import { runSession } from './context.js';
 import { installDeterminism, uninstallDeterminism } from './determinism.js';
 import { RewindError } from './errors.js';
+import { Forker } from './fork.js';
 import { install as installNetwork, rewindFetch, uninstall as uninstallNetwork } from './interceptor.js';
 import { Recorder } from './recorder.js';
 import { Replayer } from './replayer.js';
 import { loadRecording, recordingPath, saveRecording } from './store.js';
-import type { AutoOptions, Mode, RecordOptions, ReplayOptions } from './types.js';
+import type { AutoOptions, ForkOptions, ForkResult, Mode, RecordOptions, ReplayOptions } from './types.js';
 
 /**
  * Patch `fetch`, `node:http`/`node:https`, `Date`, `Math.random` and `crypto.randomUUID`.
@@ -66,6 +67,36 @@ export async function replay<T>(name: string, fn: () => T | Promise<T>, opts: Re
 }
 
 /**
+ * Replay the recording `name` up to step `at`, then run live from there, e.g. to try a fixed
+ * prompt at step 31 without paying for steps 0–30 again. Before `at`, requests are matched by
+ * method + URL in recorded order and their bodies are ignored, so a changed prompt still gets the
+ * recorded history. Clock and UUIDs follow the original run until it goes live.
+ *
+ * The fork is saved as its own recording (`<name>.fork-<at>` unless `saveAs` says otherwise),
+ * which `replay()` reproduces exactly.
+ */
+export async function fork<T>(name: string, fn: () => T | Promise<T>, opts: ForkOptions = {}): Promise<ForkResult<T>> {
+  const original = await loadRecording(name, opts.dir);
+  const saveAs = opts.saveAs === false ? null : (opts.saveAs ?? `${name}.fork-${opts.at ?? 'end'}`);
+  const path = saveAs ? recordingPath(saveAs, opts.dir) : null;
+  const forker = new Forker(original, saveAs ?? `${name}.fork`, opts);
+
+  let outcome: { ok: true; value: T } | { ok: false; error: unknown };
+  try {
+    outcome = { ok: true, value: await runSession(forker, fn) };
+  } catch (error) {
+    outcome = { ok: false, error };
+  }
+  await forker.recorder.settle();
+  if (path) {
+    forker.recorder.setFork(forker.forkInfo());
+    await saveRecording(path, forker.recorder.toRecording());
+  }
+  if (!outcome.ok) throw outcome.error;
+  return { value: outcome.value, savedAs: saveAs, ...forker.result };
+}
+
+/**
  * Replay `name` if it has been recorded, otherwise record it. Ideal for tests.
  * The `REWIND_MODE` environment variable (`record` | `replay` | `auto`) overrides the choice,
  * e.g. `REWIND_MODE=record npm test` refreshes every recording.
@@ -87,7 +118,7 @@ function resolveMode(name: string, dir?: string): Exclude<Mode, 'auto'> {
 /** Load a recording to inspect it. */
 export const load = loadRecording;
 
-export const rewind = { record, replay, auto, load, fetch: rewindFetch, install, uninstall };
+export const rewind = { record, replay, fork, auto, load, fetch: rewindFetch, install, uninstall };
 export default rewind;
 
 export { rewindFetch as fetch, recordingPath };

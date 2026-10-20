@@ -12,6 +12,7 @@ import { rewind } from 'rewindjs';
 
 await rewind.record('checkout-bug', () => runAgent(input)); // real run, every request captured
 await rewind.replay('checkout-bug', () => runAgent(input)); // exact replay: no network, no cost
+await rewind.fork('checkout-bug', () => runAgent(input), { at: 31 }); // steps 0–30 replayed, 31+ live
 ```
 
 Works with anything that talks over `fetch` or `node:http`: Anthropic, OpenAI, the Vercel AI SDK, LangChain, MCP over HTTP, axios, got, plain `fetch`. No code changes to your agent.
@@ -36,6 +37,35 @@ ReplayDivergenceError: Replay diverged: the recording has no response for POST h
 
 - **Secrets never hit disk**: `Authorization`, `x-api-key`, cookies, `?key=` params and known key formats (`sk-ant-…`, `sk-…`, `ghp_…`, `AKIA…`, `AIza…`) are redacted from requests *and* responses.
 - **Readable, compact recordings**: plain JSON you can commit and review, with each distinct body stored only once.
+
+## Fork: fix step 31 without re-running steps 0–30
+
+You found the bug and changed the prompt. With `fork`, the agent gets the *recorded* responses for every step before `at`, then goes live:
+
+```ts
+const res = await rewind.fork('book-flight', () => agent(fixedPrompt), { at: 2 });
+// res.value     → what your agent returned
+// res.replayed  → 2 steps served from the recording
+// res.live      → 1 step sent to the real model
+// res.savedAs   → 'book-flight.fork-2', a new recording you can commit as a regression test
+```
+
+Before the fork point, requests match by **method + URL in recorded order, ignoring the body**. A changed system prompt changes every request body, and the fork still gets the same history the failing run saw. `Date`, `Math.random` and UUIDs follow the original run until it goes live. If your changed code makes a request the recording has no counterpart for before `at`, the fork goes live there and reports `reason: 'unmatched'`.
+
+Run `node examples/fork-demo.mjs` (after `npm run build`) to see it end to end.
+
+**Try "what if" without touching your code:**
+
+```ts
+// Send a different system prompt from step 31 on
+await rewind.fork('run', agent, { at: 31, patchRequest: (req) => ({ ...req.body, system: newSystem }) });
+
+// What if the search tool had failed at step 12?
+await rewind.fork('run', agent, {
+  at: 13,
+  patchResponse: (res, { step }) => (step === 12 ? { error: 'timeout' } : undefined),
+});
+```
 
 ## Use it in tests
 
@@ -62,6 +92,9 @@ Runs `fn` against the real network and saves every request and response to `.rew
 
 ### `replay(name, fn, options?)`
 Runs `fn` with every `fetch` answered from the recording. Throws `ReplayDivergenceError` if the run makes a request the recording can't answer. It throws even if your code caught the error, because SDK retry logic often hides it. Identical requests replay in recorded order.
+
+### `fork(name, fn, options?)`
+Replays `name` up to step `at`, then runs live. Saves the run as its own recording that `replay()` reproduces. Options: `at` (default: go live when the recording runs out), `saveAs` (name, or `false`), `patchRequest`, `patchResponse`, plus the record and replay options. Returns `{ value, replayed, live, liveFrom, reason, savedAs }`.
 
 ### `auto(name, fn, options?)`
 Replays if the recording exists, otherwise records. `REWIND_MODE=record|replay|auto` overrides.
@@ -112,7 +145,7 @@ const client = new Anthropic({ fetch: rewind.fetch });
 
 - [x] **Phase 1**: fetch interception, recording format, redaction, replay, divergence errors
 - [x] **Phase 2**: deterministic `Date`, `Math.random()`, `crypto.randomUUID()`; `node:http` interception; concurrent sessions via `AsyncLocalStorage`
-- [ ] **Phase 3**: `fork(name, { at: 31 })`: replay up to a step, then go live with a patched prompt
+- [x] **Phase 3**: `fork()`: replay up to a step, then go live, with request/response patching
 - [ ] **Phase 4**: `npx rewind diff a b`, `rewind ls`, token and cost deltas
 - [ ] **Phase 5**: `npx rewind ui`, a local timeline viewer you can scrub through
 - [ ] **Phase 6**: Vitest/Jest matchers, GitHub Action, Python port

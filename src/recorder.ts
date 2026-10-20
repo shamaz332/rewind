@@ -29,21 +29,31 @@ export class Recorder implements Session {
   private seq = 0;
 
   private readonly flags: DeterminismFlags;
-  private readonly seed = (realRandom() * 2 ** 32) >>> 0;
-  private readonly rand = seededRandom(this.seed);
-  private readonly clockStart = realNow();
+  private readonly seed: number;
+  private readonly rand: () => number;
+  private readonly clockStart: number;
   private readonly clockDeltas: number[] = [];
   private readonly uuids: string[] = [];
+  private fork: Recording['fork'];
 
   constructor(
     readonly name: string,
     private readonly opts: RecordOptions,
+    /** A fork continues the original run's random sequence and clock baseline. */
+    base?: { seed: number | null; clockStart: number | null },
   ) {
     this.flags = resolveFlags(opts.deterministic);
+    this.seed = base?.seed ?? (realRandom() * 2 ** 32) >>> 0;
+    this.rand = seededRandom(this.seed);
+    this.clockStart = base?.clockStart ?? realNow();
   }
 
   now(): number {
-    const t = realNow();
+    return this.observeNow(realNow());
+  }
+
+  /** Record a clock value obtained elsewhere (a fork replaying the original run). */
+  observeNow(t: number): number {
     if (this.flags.clock) this.clockDeltas.push(t - this.clockStart);
     return t;
   }
@@ -53,16 +63,33 @@ export class Recorder implements Session {
   }
 
   uuid(): string {
-    const id = realUUID();
+    return this.observeUuid(realUUID());
+  }
+
+  observeUuid(id: string): string {
     if (this.flags.uuid) this.uuids.push(id);
     return id;
   }
 
-  async fetch(req: Request, realFetch: RealFetch, via: Transport): Promise<Response> {
+  /** The seq the next request will get. */
+  get nextSeq(): number {
+    return this.seq;
+  }
+
+  setFork(info: NonNullable<Recording['fork']>): void {
+    this.fork = info;
+  }
+
+  async fetch(
+    req: Request,
+    realFetch: RealFetch,
+    via: Transport,
+    meta: Pick<FetchStep, 'source' | 'patched'> = {},
+  ): Promise<Response> {
     const seq = this.seq++;
     const startedAt = this.elapsed();
     const { recorded } = await runInternal(() => describeRequest(req, this.opts, this.blobs));
-    const step: FetchStep = { seq, kind: 'fetch', via, startedAt, durationMs: 0, request: recorded };
+    const step: FetchStep = { seq, kind: 'fetch', via, startedAt, durationMs: 0, request: recorded, ...meta };
     this.steps.push(step);
 
     let res: Response;
@@ -117,6 +144,7 @@ export class Recorder implements Session {
       name: this.name,
       createdAt: new Date(realNow()).toISOString(),
       runtime: { node: process.version },
+      ...(this.fork ? { fork: this.fork } : {}),
       steps: [...this.steps].sort((a, b) => a.seq - b.seq),
       determinism: {
         seed: this.flags.random ? this.seed : null,

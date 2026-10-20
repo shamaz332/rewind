@@ -39,6 +39,10 @@ export interface FetchStep {
   kind: 'fetch';
   /** Which API made the request. Recordings replay through either. */
   via: 'fetch' | 'node:http';
+  /** In a fork recording: whether this step was served from the original recording or the live network. */
+  source?: 'replayed' | 'live';
+  /** In a fork recording: the request was changed by `patchRequest` before it was sent. */
+  patched?: true;
   /** Milliseconds after the session started. */
   startedAt: number;
   durationMs: number;
@@ -55,6 +59,8 @@ export interface Recording {
   name: string;
   createdAt: string;
   runtime: { node: string };
+  /** Present when this recording was produced by `fork()`. */
+  fork?: ForkInfo;
   steps: Step[];
   /** Recorded clock and randomness, so replays see the same values. */
   determinism: RecordedDeterminism;
@@ -113,5 +119,66 @@ export interface ReplayOptions extends BaseOptions {
 }
 
 export type AutoOptions = RecordOptions & ReplayOptions;
+
+export interface ForkInfo {
+  /** The recording this fork started from. */
+  from: string;
+  /** The step the fork was asked to go live at (null: after the recording ran out). */
+  at: number | null;
+  /** Seq in this recording of the first live step, or null if the run never went live. */
+  liveFrom: number | null;
+  /** Why it went live: it reached `at`, or the run made a request the original recording has no counterpart for. */
+  reason: 'at' | 'unmatched' | null;
+}
+
+export interface PatchableRequest {
+  method: string;
+  url: string;
+  headers: Record<string, string>;
+  /** Parsed JSON when the body is JSON, the raw text otherwise, null when there is no body. */
+  body: unknown;
+}
+
+export interface PatchableResponse {
+  status: number;
+  headers: Record<string, string>;
+  /** Parsed JSON when the body is JSON, the raw text otherwise, null when there is no body. */
+  body: unknown;
+}
+
+export interface ForkOptions extends RecordOptions, Omit<ReplayOptions, 'strict' | 'passthrough'> {
+  /**
+   * Seq of the first step to run live. Steps before it are replayed from the recording.
+   * Default: replay every recorded step, go live once the recording runs out.
+   */
+  at?: number;
+  /** Name for the fork's own recording. Default: `<name>.fork-<at>`. Pass `false` to not save it. */
+  saveAs?: string | false;
+  /**
+   * Change a live request before it is sent, e.g. swap the system prompt.
+   * Return the new body (an object is sent as JSON), or undefined to send it unchanged.
+   */
+  patchRequest?: (req: PatchableRequest, ctx: { step: number }) => unknown;
+  /**
+   * Change a replayed response before the agent sees it, e.g. make a tool call fail.
+   * Return the new body, or undefined to keep the recorded one.
+   */
+  patchResponse?: (res: PatchableResponse, ctx: { step: number; request: PatchableRequest }) => unknown;
+}
+
+export interface ForkResult<T> {
+  /** What the callback returned. */
+  value: T;
+  /** Name of the saved fork recording, or null when `saveAs: false`. */
+  savedAs: string | null;
+  /** Steps answered from the original recording. */
+  replayed: number;
+  /** Steps sent to the live network. */
+  live: number;
+  /** Seq of the first live step, or null if the run never went live. */
+  liveFrom: number | null;
+  /** Why the run went live: it reached `at`, or diverged from the recording before `at`. */
+  reason: 'at' | 'unmatched' | null;
+}
 
 export type Mode = 'record' | 'replay' | 'auto';

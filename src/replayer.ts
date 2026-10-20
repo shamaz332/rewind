@@ -16,6 +16,7 @@ export class Replayer implements Session {
   private readonly blobs: BlobStore;
   /** Recorded steps per match key, in recorded order. Identical requests replay first-in, first-out. */
   private readonly queues = new Map<string, FetchStep[]>();
+  private readonly sorted: FetchStep[];
   private readonly used = new Set<number>();
   readonly divergences: ReplayDivergenceError[] = [];
 
@@ -34,7 +35,8 @@ export class Replayer implements Session {
   ) {
     this.name = recording.name;
     this.blobs = BlobStore.fromJSON(recording.blobs);
-    for (const step of [...recording.steps].sort((a, b) => a.seq - b.seq)) {
+    this.sorted = [...recording.steps].sort((a, b) => a.seq - b.seq);
+    for (const step of this.sorted) {
       const q = this.queues.get(step.request.matchKey);
       if (q) q.push(step);
       else this.queues.set(step.request.matchKey, [step]);
@@ -82,10 +84,48 @@ export class Replayer implements Session {
     this.used.add(step.seq);
 
     if (step.error) throw new TypeError('fetch failed', { cause: new Error(step.error.message) });
+    return this.answer(step, req.signal);
+  }
+
+  /** Serve one recorded step: its response, or the network error it recorded. */
+  answer(step: FetchStep, signal: AbortSignal, bodyOverride?: Uint8Array): Response {
+    if (step.error) throw new TypeError('fetch failed', { cause: new Error(step.error.message) });
     if (!step.response) {
       throw new TypeError('fetch failed', { cause: new Error('request had not completed when the recording ended') });
     }
-    return this.respond(step.response, req.signal);
+    return this.respond(step.response, signal, bodyOverride);
+  }
+
+  /**
+   * Order-based matching for forks: the first unused step below `below` with the same method and
+   * URL, ignoring the body. A changed prompt alters every body, yet the agent's history is the same.
+   */
+  takeLoose(method: string, matchUrl: string, below: number): FetchStep | null {
+    const step = this.sorted.find(
+      (s) => s.seq < below && !this.used.has(s.seq) && s.request.method === method && redactUrl(s.request.url, true) === matchUrl,
+    );
+    if (!step) return null;
+    this.used.add(step.seq);
+    return step;
+  }
+
+  hasUnusedBelow(below: number): boolean {
+    return this.sorted.some((s) => s.seq < below && !this.used.has(s.seq));
+  }
+
+  /** The recorded response body of a step, for patching. */
+  responseBody(step: FetchStep): Uint8Array | null {
+    return step.response?.body ? this.blobs.get(step.response.body) : null;
+  }
+
+  /** Clock reads and UUIDs left over from the recording, for a fork to hand out before it goes live. */
+  takeRecordedNow(): number | null {
+    if (!this.clock || this.clockIndex >= this.clock.deltas.length) return null;
+    return this.clock.start + this.clock.deltas[this.clockIndex++]!;
+  }
+
+  takeRecordedUuid(): string | null {
+    return this.uuids?.[this.uuidIndex++] ?? null;
   }
 
   /** Errors to raise once the replayed run has finished. */
@@ -100,14 +140,15 @@ export class Replayer implements Session {
     }
   }
 
-  private respond(rec: RecordedResponse, signal: AbortSignal): Response {
+  private respond(rec: RecordedResponse, signal: AbortSignal, bodyOverride?: Uint8Array): Response {
     const headers = new Headers();
     for (const [k, v] of Object.entries(rec.headers)) if (!DROP_HEADERS.has(k)) headers.append(k, v);
 
     let body: ReadableStream<Uint8Array> | null = null;
-    if (rec.body !== null && !NULL_BODY_STATUS.has(rec.status)) {
-      const bytes = this.blobs.get(rec.body);
-      const chunks = rec.chunks.length ? rec.chunks : [{ size: bytes.byteLength, at: 0 }];
+    if ((rec.body !== null || bodyOverride) && !NULL_BODY_STATUS.has(rec.status)) {
+      const bytes = bodyOverride ?? this.blobs.get(rec.body!);
+      // A patched body no longer lines up with the recorded chunk boundaries, so it is sent whole.
+      const chunks = rec.chunks.length && !bodyOverride ? rec.chunks : [{ size: bytes.byteLength, at: 0 }];
       const original = this.opts.timing === 'original';
       const speed = this.opts.speed && this.opts.speed > 0 ? this.opts.speed : 1;
       let i = 0;
