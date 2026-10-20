@@ -55,5 +55,8 @@
   },
   "dependencies": {
     "@mswjs/interceptors": "^0.41.9"
+  },
+  "bin": {
+    "rewind": "./dist/cli.js"
   }
 }

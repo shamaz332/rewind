@@ -67,6 +67,48 @@ await rewind.fork('run', agent, {
 });
 ```
 
+## Inspect and compare runs
+
+```bash
+npx rewind ls                              # every recording: steps, LLM calls, tokens, age
+npx rewind show book-flight                # timeline of one run
+npx rewind show book-flight --step 2       # one step: request, model output, response
+npx rewind diff book-flight book-flight.fork-2
+```
+
+`diff` lines up two runs step by step, even when one made extra calls, and shows what changed and what it did:
+
+```
+a book-flight (3 steps)    b book-flight.fork-2 (3 steps)
+
+   #0    #0  ~  POST api.example.com/v1/messages
+                request  $.system: "…or the user." → "…or the user. Always choose the cheapest option."
+   #1    #1  =  POST api.example.com/flights
+   #2    #2  ~  POST api.example.com/v1/messages
+                request  $.system: "…or the user." → "…or the user. Always choose the cheapest option."
+                output   Booking TP 1351 for €315
+                         Booking U2 8173 for €216
+                tokens  +9 in / 0 out
+
+First divergence at a#0 / b#0
+1 same · 2 changed · 0 added · 0 removed
+tokens 106 in / 21 out → 115 in / 21 out  ·  time 51 ms → 11 ms
+```
+
+rewind understands **Anthropic, OpenAI (Chat Completions and Responses) and Gemini** traffic, streamed or not: it shows the model, token usage (cached tokens counted separately) and output text, including tool calls. Everything has `--json` output; `diff --exit-code` exits 1 when runs differ, for CI.
+
+**Costs:** rewind does not ship a price list, because prices change and a stale table would show wrong numbers. To see costs, add `.rewind/pricing.json` with your provider's current prices in USD per million tokens. Keys match a model name exactly or as a prefix:
+
+```json
+{
+  "my-model-name": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
+}
+```
+
+**Housekeeping:** `npx rewind prune --older-than 30d` (add `--dry-run` to preview).
+
+The same analysis is available from code: `summarize(recording)`, `diffRecordings(a, b)`.
+
 ## Use it in tests
 
 ```ts
@@ -146,7 +188,7 @@ const client = new Anthropic({ fetch: rewind.fetch });
 - [x] **Phase 1**: fetch interception, recording format, redaction, replay, divergence errors
 - [x] **Phase 2**: deterministic `Date`, `Math.random()`, `crypto.randomUUID()`; `node:http` interception; concurrent sessions via `AsyncLocalStorage`
 - [x] **Phase 3**: `fork()`: replay up to a step, then go live, with request/response patching
-- [ ] **Phase 4**: `npx rewind diff a b`, `rewind ls`, token and cost deltas
+- [x] **Phase 4**: CLI: `rewind ls`, `show`, `diff`, `prune`; token usage and costs for Anthropic, OpenAI and Gemini
 - [ ] **Phase 5**: `npx rewind ui`, a local timeline viewer you can scrub through
 - [ ] **Phase 6**: Vitest/Jest matchers, GitHub Action, Python port
 

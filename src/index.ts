@@ -122,6 +122,9 @@ export const rewind = { record, replay, fork, auto, load, fetch: rewindFetch, in
 export default rewind;
 
 export { rewindFetch as fetch, recordingPath };
+export { summarize, type RecordingSummary, type StepSummary } from './inspect.js';
+export { diffRecordings, type RecordingDiff, type StepDiff } from './diff.js';
+export { extractUsage, extractText, parsePayloads, type Usage, type Pricing } from './llm.js';
 export { RewindError, RecordingNotFoundError, ReplayDivergenceError, UnusedStepsError } from './errors.js';
 export { REDACTED } from './redact.js';
 export type * from './types.js';

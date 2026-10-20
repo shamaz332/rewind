@@ -20,23 +20,37 @@ const server = createServer(async (req, res) => {
     flights[0].price = Math.max(...flights.map((f) => f.price)) + 40; // the airline's sponsored result is listed first
     return res.end(JSON.stringify(flights));
   }
+  // A fake model that speaks the Anthropic Messages format, so `rewind show`/`diff` see tokens and output.
   modelCalls++;
-  const { system, task, flights } = JSON.parse(body);
-  if (!flights) return res.end(JSON.stringify({ text: `Plan: search flights for "${task}", then pick one.` }));
-  const pick = system.includes('cheapest') ? flights.reduce((a, b) => (b.price < a.price ? b : a)) : flights[0];
-  res.end(JSON.stringify({ text: `Booking ${pick.id} for €${pick.price}`, pick }));
+  const { model, system, messages } = JSON.parse(body);
+  const { task, flights } = JSON.parse(messages.at(-1).content);
+  let text = `Plan: search flights for "${task}", then pick one.`;
+  if (flights) {
+    const pick = system.includes('cheapest') ? flights.reduce((a, b) => (b.price < a.price ? b : a)) : flights[0];
+    text = `Booking ${pick.id} for €${pick.price}`;
+  }
+  res.end(JSON.stringify({
+    id: `msg_${modelCalls}`, type: 'message', role: 'assistant', model,
+    content: [{ type: 'text', text }], stop_reason: 'end_turn',
+    usage: { input_tokens: Math.ceil(body.length / 4), output_tokens: Math.ceil(text.length / 4) },
+  }));
 });
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const url = `http://127.0.0.1:${server.address().port}`;
 const post = async (path, body) =>
   (await fetch(url + path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })).json();
 
+const ask = (system, content) =>
+  post('/v1/messages', { model: 'demo-model', max_tokens: 200, system, messages: [{ role: 'user', content: JSON.stringify(content) }] });
+
 function agent(system) {
   return async () => {
     const task = 'Lisbon, 12 May';
-    await post('/model', { system, task }); // step 0: plan
+    await ask(system, { task }); // step 0: plan
     const flights = await post('/flights', { task }); // step 1: tool call
-    const { pick } = await post('/model', { system, task, flights }); // step 2: decide
+    const reply = await ask(system, { task, flights }); // step 2: decide
+    const id = /Booking (\S+ \d+)/.exec(reply.content[0].text)[1];
+    const pick = flights.find((f) => f.id === id);
     const cheapest = Math.min(...flights.map((f) => f.price));
     return { pick, cheapest, ok: pick.price === cheapest };
   };
@@ -62,4 +76,5 @@ line(`   replayed ${fixed.replayed} steps, ran ${fixed.live} live: ${modelCalls 
 line(`   saved as "${fixed.savedAs}", which you can now commit as a regression test.`);
 
 server.close();
-await rm(dir, { recursive: true, force: true });
+if (process.env.KEEP) line(`\n   recordings kept in ${dir}/ (try: npx rewind diff book-flight book-flight.fork-2 --dir ${dir})`);
+else await rm(dir, { recursive: true, force: true });
