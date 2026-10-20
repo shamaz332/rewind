@@ -1,52 +1,65 @@
 import { existsSync } from 'node:fs';
+import { runSession } from './context.js';
+import { installDeterminism, uninstallDeterminism } from './determinism.js';
 import { RewindError } from './errors.js';
-import { activate, deactivate, install, rewindFetch, uninstall } from './interceptor.js';
+import { install as installNetwork, rewindFetch, uninstall as uninstallNetwork } from './interceptor.js';
 import { Recorder } from './recorder.js';
 import { Replayer } from './replayer.js';
 import { loadRecording, recordingPath, saveRecording } from './store.js';
 import type { AutoOptions, Mode, RecordOptions, ReplayOptions } from './types.js';
 
+/**
+ * Patch `fetch`, `node:http`/`node:https`, `Date`, `Math.random` and `crypto.randomUUID`.
+ * Runs on import. Outside a session every patched API behaves exactly like the original.
+ */
+export function install(): void {
+  installNetwork();
+  installDeterminism();
+}
+
+/** Restore every patched global. */
+export function uninstall(): void {
+  uninstallNetwork();
+  uninstallDeterminism();
+}
+
 install();
 
 /**
- * Run `fn` against the real network and save every fetch it makes as the recording `name`.
- * The recording is saved even when `fn` throws, so failed runs can be replayed too.
+ * Run `fn` against the real network and save every request it makes, plus the clock and
+ * randomness it reads, as the recording `name`. The recording is saved even when `fn` throws,
+ * so failed runs can be replayed too. Sessions may run concurrently.
  */
 export async function record<T>(name: string, fn: () => T | Promise<T>, opts: RecordOptions = {}): Promise<T> {
   const path = recordingPath(name, opts.dir);
-  const recorder = new Recorder(opts);
-  activate(recorder.handle);
+  const recorder = new Recorder(name, opts);
   let outcome: { ok: true; value: T } | { ok: false; error: unknown };
   try {
-    outcome = { ok: true, value: await fn() };
+    outcome = { ok: true, value: await runSession(recorder, fn) };
   } catch (error) {
     outcome = { ok: false, error };
-  } finally {
-    deactivate(recorder.handle);
   }
   await recorder.settle();
-  await saveRecording(path, recorder.toRecording(name));
+  await saveRecording(path, recorder.toRecording());
   if (!outcome.ok) throw outcome.error;
   return outcome.value;
 }
 
 /**
- * Run `fn` with every fetch answered from the recording `name`. No network, no cost.
+ * Run `fn` with every request answered from the recording `name`, and with `Date`, `Math.random`
+ * and `crypto.randomUUID` returning the recorded values. No network, no cost.
  * Throws `ReplayDivergenceError` if the run makes a request the recording has no answer for,
  * even if `fn` caught it (SDK retries often do).
  */
 export async function replay<T>(name: string, fn: () => T | Promise<T>, opts: ReplayOptions = {}): Promise<T> {
   const recording = await loadRecording(name, opts.dir);
   const replayer = new Replayer(recording, opts);
-  activate(replayer.handle);
   let value: T;
   try {
-    value = await fn();
+    value = await runSession(replayer, fn);
   } catch (error) {
     replayer.finish();
     throw error;
-  } finally {
-    deactivate(replayer.handle);
   }
   replayer.finish();
   return value;
@@ -77,7 +90,7 @@ export const load = loadRecording;
 export const rewind = { record, replay, auto, load, fetch: rewindFetch, install, uninstall };
 export default rewind;
 
-export { rewindFetch as fetch, install, uninstall, recordingPath };
+export { rewindFetch as fetch, recordingPath };
 export { RewindError, RecordingNotFoundError, ReplayDivergenceError, UnusedStepsError } from './errors.js';
 export { REDACTED } from './redact.js';
 export type * from './types.js';

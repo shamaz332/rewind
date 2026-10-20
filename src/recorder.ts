@@ -1,4 +1,5 @@
-import type { FetchHandler } from './interceptor.js';
+import { runInternal, type RealFetch, type Session, type Transport } from './context.js';
+import { realNow, realRandom, realUUID, resolveFlags, seededRandom, type DeterminismFlags } from './determinism.js';
 import { redactHeaders, redactText, redactUrl } from './redact.js';
 import { describeRequest } from './request.js';
 import { BlobStore, tryDecode } from './store.js';
@@ -17,20 +18,51 @@ interface BodyCapture {
   promise: Promise<void>;
 }
 
-export class Recorder {
+// The body handed to the caller is already decoded, so these would describe it wrongly.
+const DECODED_BODY_DROP = ['content-encoding', 'content-length', 'transfer-encoding'];
+
+export class Recorder implements Session {
   private readonly steps: FetchStep[] = [];
   private readonly blobs = new BlobStore();
   private readonly captures: BodyCapture[] = [];
   private readonly t0 = performance.now();
   private seq = 0;
 
-  constructor(private readonly opts: RecordOptions) {}
+  private readonly flags: DeterminismFlags;
+  private readonly seed = (realRandom() * 2 ** 32) >>> 0;
+  private readonly rand = seededRandom(this.seed);
+  private readonly clockStart = realNow();
+  private readonly clockDeltas: number[] = [];
+  private readonly uuids: string[] = [];
 
-  readonly handle: FetchHandler = async (req, realFetch) => {
+  constructor(
+    readonly name: string,
+    private readonly opts: RecordOptions,
+  ) {
+    this.flags = resolveFlags(opts.deterministic);
+  }
+
+  now(): number {
+    const t = realNow();
+    if (this.flags.clock) this.clockDeltas.push(t - this.clockStart);
+    return t;
+  }
+
+  random(): number {
+    return this.flags.random ? this.rand() : realRandom();
+  }
+
+  uuid(): string {
+    const id = realUUID();
+    if (this.flags.uuid) this.uuids.push(id);
+    return id;
+  }
+
+  async fetch(req: Request, realFetch: RealFetch, via: Transport): Promise<Response> {
     const seq = this.seq++;
     const startedAt = this.elapsed();
-    const { recorded } = await describeRequest(req, this.opts, this.blobs);
-    const step: FetchStep = { seq, kind: 'fetch', startedAt, durationMs: 0, request: recorded };
+    const { recorded } = await runInternal(() => describeRequest(req, this.opts, this.blobs));
+    const step: FetchStep = { seq, kind: 'fetch', via, startedAt, durationMs: 0, request: recorded };
     this.steps.push(step);
 
     let res: Response;
@@ -57,15 +89,15 @@ export class Recorder {
 
     if (!res.body) {
       step.durationMs = this.elapsed() - startedAt;
-      return res;
+      return rebuild(res, null);
     }
 
     // One branch goes back to the caller untouched; the other is drained eagerly so the
     // recording completes even if the caller never reads (or cancels) the body.
     const [mine, theirs] = res.body.tee();
-    this.captures.push(this.capture(mine, step, response, startedAt));
+    this.captures.push(runInternal(() => this.capture(mine, step, response, startedAt)));
     return rebuild(res, theirs);
-  };
+  }
 
   /** Wait for in-flight bodies, marking any still streaming after the timeout as truncated. */
   async settle(): Promise<void> {
@@ -79,13 +111,18 @@ export class Recorder {
     for (const c of this.captures) if (!c.done) c.finalize('session ended before the response body finished');
   }
 
-  toRecording(name: string): Recording {
+  toRecording(): Recording {
     return {
       format: FORMAT,
-      name,
-      createdAt: new Date().toISOString(),
+      name: this.name,
+      createdAt: new Date(realNow()).toISOString(),
       runtime: { node: process.version },
       steps: [...this.steps].sort((a, b) => a.seq - b.seq),
+      determinism: {
+        seed: this.flags.random ? this.seed : null,
+        clock: this.flags.clock ? { start: this.clockStart, deltas: this.clockDeltas } : null,
+        uuids: this.flags.uuid ? this.uuids : null,
+      },
       blobs: this.blobs.toJSON(),
     };
   }
@@ -146,8 +183,10 @@ export class Recorder {
   }
 }
 
-function rebuild(res: Response, body: ReadableStream<Uint8Array>): Response {
-  const out = new Response(body, { status: res.status, statusText: res.statusText, headers: res.headers });
+function rebuild(res: Response, body: ReadableStream<Uint8Array> | null): Response {
+  const headers = new Headers(res.headers);
+  for (const h of DECODED_BODY_DROP) headers.delete(h);
+  const out = new Response(body, { status: res.status, statusText: res.statusText, headers });
   Object.defineProperty(out, 'url', { value: res.url });
   Object.defineProperty(out, 'redirected', { value: res.redirected });
   return out;

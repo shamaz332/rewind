@@ -296,6 +296,6 @@ describe('auto mode', () => {
   });
 
   it('refuses nested sessions', async () => {
-    await expect(record('outer', () => record('inner', () => 1, { dir }), { dir })).rejects.toThrow(/already active/);
+    await expect(record('outer', () => record('inner', () => 1, { dir }), { dir })).rejects.toThrow(/cannot be nested/);
   });
 });

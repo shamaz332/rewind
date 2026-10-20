@@ -1,6 +1,7 @@
+import { runInternal, type RealFetch, type Session, type Transport } from './context.js';
+import { realNow, realRandom, realUUID, resolveFlags, seededRandom, uuidFrom } from './determinism.js';
 import { ReplayDivergenceError, UnusedStepsError } from './errors.js';
 import { firstDifference, type Difference } from './hash.js';
-import type { FetchHandler } from './interceptor.js';
 import { redactUrl } from './redact.js';
 import { describeRequest } from './request.js';
 import { BlobStore, tryDecode } from './store.js';
@@ -10,30 +11,68 @@ const NULL_BODY_STATUS = new Set([101, 204, 205, 304]);
 // The recorded body is already decoded, so these would describe it wrongly.
 const DROP_HEADERS = new Set(['content-encoding', 'content-length', 'transfer-encoding']);
 
-export class Replayer {
+export class Replayer implements Session {
+  readonly name: string;
   private readonly blobs: BlobStore;
   /** Recorded steps per match key, in recorded order. Identical requests replay first-in, first-out. */
   private readonly queues = new Map<string, FetchStep[]>();
   private readonly used = new Set<number>();
   readonly divergences: ReplayDivergenceError[] = [];
 
+  private readonly clock: { start: number; deltas: number[] } | null;
+  private clockIndex = 0;
+  /** Once recorded clock values run out, time moves on in real time from the last recorded value. */
+  private clockOverflow: { base: number; realAt: number } | null = null;
+  private readonly rand: (() => number) | null;
+  private readonly uuids: string[] | null;
+  private uuidIndex = 0;
+  private readonly uuidRand: () => number;
+
   constructor(
     private readonly recording: Recording,
     private readonly opts: ReplayOptions,
   ) {
+    this.name = recording.name;
     this.blobs = BlobStore.fromJSON(recording.blobs);
     for (const step of [...recording.steps].sort((a, b) => a.seq - b.seq)) {
       const q = this.queues.get(step.request.matchKey);
       if (q) q.push(step);
       else this.queues.set(step.request.matchKey, [step]);
     }
+
+    const flags = resolveFlags(opts.deterministic);
+    const d = recording.determinism;
+    this.clock = flags.clock ? (d?.clock ?? null) : null;
+    this.rand = flags.random && d?.seed != null ? seededRandom(d.seed) : null;
+    this.uuids = flags.uuid ? (d?.uuids ?? null) : null;
+    this.uuidRand = seededRandom(((d?.seed ?? 0) ^ 0x9e3779b9) >>> 0);
   }
 
-  readonly handle: FetchHandler = async (req, realFetch) => {
+  now(): number {
+    if (!this.clock) return realNow();
+    if (this.clockOverflow) return this.clockOverflow.base + (realNow() - this.clockOverflow.realAt);
+    const delta = this.clock.deltas[this.clockIndex++];
+    const value = this.clock.start + (delta ?? 0);
+    // Time keeps moving from the moment the last recorded value was handed out.
+    if (this.clockIndex >= this.clock.deltas.length) this.clockOverflow = { base: value, realAt: realNow() };
+    return value;
+  }
+
+  random(): number {
+    return this.rand ? this.rand() : realRandom();
+  }
+
+  uuid(): string {
+    if (!this.uuids) return realUUID();
+    // Past the recorded values, keep producing deterministic UUIDs rather than random ones.
+    return this.uuids[this.uuidIndex++] ?? uuidFrom(this.uuidRand);
+  }
+
+  async fetch(req: Request, realFetch: RealFetch, _via: Transport): Promise<Response> {
     if (this.opts.passthrough?.(new URL(req.url))) return realFetch(req);
     if (req.signal.aborted) throw req.signal.reason;
 
-    const live = await describeRequest(req, this.opts);
+    const live = await runInternal(() => describeRequest(req, this.opts));
     const step = this.queues.get(live.recorded.matchKey)?.shift();
     if (!step) {
       const err = this.divergence(live.recorded.method, live.recorded.url, live.matchUrl, live.bodyText);
@@ -47,7 +86,7 @@ export class Replayer {
       throw new TypeError('fetch failed', { cause: new Error('request had not completed when the recording ended') });
     }
     return this.respond(step.response, req.signal);
-  };
+  }
 
   /** Errors to raise once the replayed run has finished. */
   finish(): void {

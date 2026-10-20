@@ -14,13 +14,14 @@ await rewind.record('checkout-bug', () => runAgent(input)); // real run, every r
 await rewind.replay('checkout-bug', () => runAgent(input)); // exact replay: no network, no cost
 ```
 
-Works with any SDK that uses `fetch`: Anthropic, OpenAI, the Vercel AI SDK, LangChain, MCP over HTTP, or plain `fetch`. No code changes to your agent.
+Works with anything that talks over `fetch` or `node:http`: Anthropic, OpenAI, the Vercel AI SDK, LangChain, MCP over HTTP, axios, got, plain `fetch`. No code changes to your agent.
 
 ## Why
 
 Agents are hard to debug because they don't repeat themselves. The model answers differently each time, tools return fresh data, and a 40-step run costs real money to reproduce. Observability tools show you *what* happened. rewind lets you **run it again**.
 
-- **Exact replay**: every response, including streamed tokens chunk by chunk, comes back exactly as recorded.
+- **Exact replay**: every response, including streamed tokens chunk by chunk, comes back exactly as recorded. So do `Date.now()`, `new Date()`, `Math.random()` and `crypto.randomUUID()`, so run IDs and timestamps in your prompts match on replay too.
+- **Parallel-safe**: sessions run concurrently (e.g. `test.concurrent`), and each one sees only its own requests.
 - **Free, fast tests**: recorded runs become CI fixtures that need no API keys and finish in milliseconds.
 - **Clear divergence errors**: if your change makes the agent ask something new, rewind tells you exactly what changed:
 
@@ -73,6 +74,7 @@ Returns the parsed recording for inspection.
 | Option | Applies to | Default | |
 |---|---|---|---|
 | `dir` | all | `.rewind` | Where recordings live |
+| `deterministic` | all | `true` | Control clock, `Math.random` and UUIDs. `false` turns it off; `{ clock, random, uuid }` picks sources |
 | `redactHeaders` | all | | Extra header names to redact |
 | `redactBody` | all | | `(text, { url }) => text`, to strip timestamps or nonces from request bodies before matching |
 | `settleTimeoutMs` | record | `10000` | How long to wait for streams still open when `fn` returns |
@@ -84,6 +86,18 @@ Returns the parsed recording for inspection.
 ### How matching works
 A request matches a recorded one by **method + URL + body**. Query parameters are compared regardless of order, JSON bodies regardless of key order, and secrets are redacted before comparing. Headers are not compared, so a rotated API key never breaks a replay.
 
+### What gets controlled
+Inside a session, rewind intercepts:
+
+| Source | Record | Replay |
+|---|---|---|
+| `fetch`, `node:http`, `node:https` | real network, saved | answered from the recording |
+| `Date.now()`, `new Date()`, `Date()` | real time, saved | recorded values, then real time continues from the last one |
+| `Math.random()` | seeded generator, seed saved | same seed, same sequence |
+| `crypto.randomUUID()` (global and `node:crypto`) | real UUIDs, saved | recorded UUIDs, then deterministic ones |
+
+Outside a session, every patched API behaves exactly like the original. Calls are attributed to a session through `AsyncLocalStorage`, so test runners and loggers calling `Date.now()` in the background never consume recorded values. `performance.now()`, timers and `crypto.getRandomValues()` are not touched.
+
 ## Important: import order
 rewind patches `globalThis.fetch` when it is imported. Some SDKs capture `fetch` when you construct a client, so **import `rewindjs` before you create your SDK clients**, or pass the fetch explicitly:
 
@@ -92,10 +106,12 @@ import { rewind } from 'rewindjs';
 const client = new Anthropic({ fetch: rewind.fetch });
 ```
 
+`node:http` clients (axios, got, …) don't need this.
+
 ## Roadmap
 
 - [x] **Phase 1**: fetch interception, recording format, redaction, replay, divergence errors
-- [ ] **Phase 2**: deterministic `Date.now()`, `Math.random()`, `crypto.randomUUID()`; `node:http` interception; concurrent sessions via `AsyncLocalStorage`
+- [x] **Phase 2**: deterministic `Date`, `Math.random()`, `crypto.randomUUID()`; `node:http` interception; concurrent sessions via `AsyncLocalStorage`
 - [ ] **Phase 3**: `fork(name, { at: 31 })`: replay up to a step, then go live with a patched prompt
 - [ ] **Phase 4**: `npx rewind diff a b`, `rewind ls`, token and cost deltas
 - [ ] **Phase 5**: `npx rewind ui`, a local timeline viewer you can scrub through

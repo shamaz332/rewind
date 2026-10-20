@@ -37,6 +37,8 @@ export interface RecordedResponse {
 export interface FetchStep {
   seq: number;
   kind: 'fetch';
+  /** Which API made the request. Recordings replay through either. */
+  via: 'fetch' | 'node:http';
   /** Milliseconds after the session started. */
   startedAt: number;
   durationMs: number;
@@ -54,10 +56,35 @@ export interface Recording {
   createdAt: string;
   runtime: { node: string };
   steps: Step[];
+  /** Recorded clock and randomness, so replays see the same values. */
+  determinism: RecordedDeterminism;
   blobs: Record<string, BlobEntry>;
 }
 
+export interface RecordedDeterminism {
+  /** Seed for `Math.random()`, or null when randomness was not controlled. */
+  seed: number | null;
+  /** Every `Date.now()` / `new Date()` value read, as offsets from `start`. Null when the clock was not controlled. */
+  clock: { start: number; deltas: number[] } | null;
+  /** Every `crypto.randomUUID()` value returned. Null when UUIDs were not controlled. */
+  uuids: string[] | null;
+}
+
+export interface DeterminismOptions {
+  /** Record and replay `Date.now()` and `new Date()`. Default: true. */
+  clock?: boolean;
+  /** Make `Math.random()` a seeded generator whose seed is saved. Default: true. */
+  random?: boolean;
+  /** Record and replay `crypto.randomUUID()`. Default: true. */
+  uuid?: boolean;
+}
+
 export interface BaseOptions {
+  /**
+   * Control time and randomness inside the session so replays see identical values.
+   * `false` disables all of it; an object picks individual sources. Default: true.
+   */
+  deterministic?: boolean | DeterminismOptions;
   /** Directory recordings are stored in. Default: `.rewind` in the current working directory. */
   dir?: string;
   /** Extra header names to redact, in addition to the built-in list (authorization, x-api-key, cookie, ...). */
