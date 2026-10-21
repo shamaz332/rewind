@@ -19,6 +19,9 @@ export class Replayer implements Session {
   private readonly sorted: FetchStep[];
   private readonly used = new Set<number>();
   readonly divergences: ReplayDivergenceError[] = [];
+  /** What this run actually did, in order: served steps and diverging requests. Used for `.failed` recordings. */
+  private readonly timeline: { step: FetchStep; divergence?: ReplayDivergenceError }[] = [];
+  private readonly liveBlobs = new BlobStore();
 
   private readonly clock: { start: number; deltas: number[] } | null;
   private clockIndex = 0;
@@ -71,17 +74,23 @@ export class Replayer implements Session {
   }
 
   async fetch(req: Request, realFetch: RealFetch, _via: Transport): Promise<Response> {
+    // `_via` is only kept for failure recordings; replay answers fetch and node:http alike.
     if (this.opts.passthrough?.(new URL(req.url))) return realFetch(req);
     if (req.signal.aborted) throw req.signal.reason;
 
-    const live = await runInternal(() => describeRequest(req, this.opts));
+    const live = await runInternal(() => describeRequest(req, this.opts, this.liveBlobs));
     const step = this.queues.get(live.recorded.matchKey)?.shift();
     if (!step) {
       const err = this.divergence(live.recorded.method, live.recorded.url, live.matchUrl, live.bodyText);
       this.divergences.push(err);
+      this.timeline.push({
+        step: { seq: -1, kind: 'fetch', via: _via, startedAt: 0, durationMs: 0, request: live.recorded, error: { name: err.name, message: err.message } },
+        divergence: err,
+      });
       throw err;
     }
     this.used.add(step.seq);
+    this.timeline.push({ step });
 
     if (step.error) throw new TypeError('fetch failed', { cause: new Error(step.error.message) });
     return this.answer(step, req.signal);
@@ -126,6 +135,35 @@ export class Replayer implements Session {
 
   takeRecordedUuid(): string | null {
     return this.uuids?.[this.uuidIndex++] ?? null;
+  }
+
+  /**
+   * What the run actually did before (and where) it diverged, as a recording of its own,
+   * or null if it never diverged.
+   */
+  failureRecording(): Recording | null {
+    const firstFailure = this.timeline.findIndex((t) => t.divergence);
+    if (firstFailure === -1) return null;
+    const original = BlobStore.fromJSON(this.recording.blobs);
+    const blobs = new BlobStore();
+    const copy = (hash: string | null | undefined, from: BlobStore) => (hash ? blobs.put(from.get(hash)) : null);
+    const steps: FetchStep[] = this.timeline.map(({ step, divergence }, seq) => {
+      const from = divergence ? this.liveBlobs : original;
+      const out: FetchStep = { ...step, seq, request: { ...step.request, body: copy(step.request.body, from) } };
+      if (step.response) out.response = { ...step.response, body: copy(step.response.body, original) };
+      if (step.sentBody) out.sentBody = copy(step.sentBody, original)!;
+      return out;
+    });
+    return {
+      format: this.recording.format,
+      name: `${this.recording.name}.failed`,
+      createdAt: new Date(realNow()).toISOString(),
+      runtime: { node: process.version },
+      failure: { from: this.recording.name, message: this.timeline[firstFailure]!.divergence!.message, step: firstFailure },
+      steps,
+      determinism: this.recording.determinism,
+      blobs: blobs.toJSON(),
+    };
   }
 
   /** Errors to raise once the replayed run has finished. */

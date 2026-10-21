@@ -66,6 +66,8 @@ export interface Recording {
   runtime: { node: string };
   /** Present when this recording was produced by `fork()`. */
   fork?: ForkInfo;
+  /** Present on `<name>.failed` recordings: what a replay of `from` actually did before it diverged. */
+  failure?: { from: string; message: string; step: number };
   steps: Step[];
   /** Recorded clock and randomness, so replays see the same values. */
   determinism: RecordedDeterminism;
@@ -121,6 +123,11 @@ export interface ReplayOptions extends BaseOptions {
   strict?: boolean;
   /** Requests for which this returns true go to the real network instead of the recording. */
   passthrough?: (url: URL) => boolean;
+  /**
+   * When the replay diverges, save what the run actually did as `<name>.failed`, so
+   * `rewind diff <name> <name>.failed` shows where it went off track. Default: true.
+   */
+  saveFailures?: boolean;
 }
 
 export type AutoOptions = RecordOptions & ReplayOptions;

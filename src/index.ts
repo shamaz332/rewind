@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { runSession } from './context.js';
 import { installDeterminism, uninstallDeterminism } from './determinism.js';
 import { RewindError } from './errors.js';
@@ -7,7 +8,8 @@ import { install as installNetwork, rewindFetch, uninstall as uninstallNetwork }
 import { Recorder } from './recorder.js';
 import { Replayer } from './replayer.js';
 import { loadRecording, recordingPath, saveRecording } from './store.js';
-import type { AutoOptions, ForkOptions, ForkResult, Mode, RecordOptions, ReplayOptions } from './types.js';
+import type { AutoOptions, ForkOptions, ForkResult, Mode, RecordOptions, Recording, ReplayOptions } from './types.js';
+import { RecordingNotFoundError } from './errors.js';
 
 /**
  * Patch `fetch`, `node:http`/`node:https`, `Date`, `Math.random` and `crypto.randomUUID`.
@@ -59,11 +61,22 @@ export async function replay<T>(name: string, fn: () => T | Promise<T>, opts: Re
   try {
     value = await runSession(replayer, fn);
   } catch (error) {
+    await settleFailure(name, replayer, opts);
     replayer.finish();
     throw error;
   }
+  await settleFailure(name, replayer, opts);
   replayer.finish();
   return value;
+}
+
+/** Save `<name>.failed` when the replay diverged; remove a stale one when it did not. */
+async function settleFailure(name: string, replayer: Replayer, opts: ReplayOptions): Promise<void> {
+  if (opts.saveFailures === false || name.endsWith('.failed')) return;
+  const path = recordingPath(`${name}.failed`, opts.dir);
+  const failed = replayer.failureRecording();
+  if (failed) await saveRecording(path, failed);
+  else await rm(path, { force: true });
 }
 
 /**
@@ -115,16 +128,48 @@ function resolveMode(name: string, dir?: string): Exclude<Mode, 'auto'> {
   return existsSync(recordingPath(name, dir)) ? 'replay' : 'record';
 }
 
+/** The outcome of `capture()`: what the callback returned, plus the recording it ran against. */
+export interface Run<T> {
+  value: T;
+  /** The recording made (record mode) or replayed (replay mode). */
+  recording: Recording;
+  mode: 'record' | 'replay';
+}
+
+/**
+ * Like `auto()`, but also returns the recording, so tests can assert on what the agent did:
+ * tools called, tokens used, requests made. In CI (the `CI` env var is set), a missing recording
+ * is an error instead of a live run, unless `REWIND_MODE=record`.
+ */
+export async function capture<T>(name: string, fn: () => T | Promise<T>, opts: AutoOptions = {}): Promise<Run<T>> {
+  const mode = resolveMode(name, opts.dir);
+  if (mode === 'record' && isCI() && process.env.REWIND_MODE?.toLowerCase() !== 'record') {
+    throw new RecordingNotFoundError(
+      name,
+      recordingPath(name, opts.dir),
+      'This is a CI run (CI is set), so rewind will not call live APIs to create it. ' +
+        'Run the test locally to record it and commit the recording, or set REWIND_MODE=record to record in CI on purpose.',
+    );
+  }
+  const value = mode === 'record' ? await record(name, fn, opts) : await replay(name, fn, opts);
+  return { value, recording: await loadRecording(name, opts.dir), mode };
+}
+
+function isCI(): boolean {
+  const ci = process.env.CI;
+  return ci !== undefined && ci !== '' && ci !== '0' && ci.toLowerCase() !== 'false';
+}
+
 /** Load a recording to inspect it. */
 export const load = loadRecording;
 
-export const rewind = { record, replay, fork, auto, load, fetch: rewindFetch, install, uninstall };
+export const rewind = { record, replay, fork, auto, capture, load, fetch: rewindFetch, install, uninstall };
 export default rewind;
 
 export { rewindFetch as fetch, recordingPath };
 export { summarize, type RecordingSummary, type StepSummary } from './inspect.js';
 export { diffRecordings, type RecordingDiff, type StepDiff } from './diff.js';
-export { extractUsage, extractText, parsePayloads, type Usage, type Pricing } from './llm.js';
+export { extractUsage, extractText, extractToolCalls, parsePayloads, type Usage, type Pricing } from './llm.js';
 export { RewindError, RecordingNotFoundError, ReplayDivergenceError, UnusedStepsError } from './errors.js';
 export { REDACTED } from './redact.js';
 export type * from './types.js';

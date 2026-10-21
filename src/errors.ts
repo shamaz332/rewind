@@ -7,8 +7,9 @@ export class RecordingNotFoundError extends RewindError {
   constructor(
     readonly recordingName: string,
     readonly path: string,
+    hint = 'Record it first with rewind.record(), or use rewind.auto().',
   ) {
-    super(`No recording named "${recordingName}" at ${path}. Record it first with rewind.record(), or use rewind.auto().`);
+    super(`No recording named "${recordingName}" at ${path}. ${hint}`);
   }
 }
 

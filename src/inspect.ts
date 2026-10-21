@@ -1,5 +1,5 @@
 import { canonicalJson } from './hash.js';
-import { costOf, extractModel, extractText, extractUsage, parsePayloads, type Pricing, type Usage } from './llm.js';
+import { costOf, extractModel, extractText, extractToolCalls, extractUsage, parsePayloads, type Pricing, type Usage } from './llm.js';
 import { BlobStore, tryDecode } from './store.js';
 import type { FetchStep, Recording } from './types.js';
 
@@ -25,6 +25,8 @@ export interface StepSummary {
   cost: number | null;
   /** The model's output text (LLM calls) or null. */
   output: string | null;
+  /** Tools the model asked to call in this response, in order. */
+  toolCalls: string[];
   /** Parsed request body: JSON value, text, or null. */
   requestBody: unknown;
   /** Response body as text, or null for binary/no body. */
@@ -96,6 +98,7 @@ export function summarize(rec: Recording, pricing: Pricing | null = null): Recor
         usage,
         cost: costOf(model, usage, pricing),
         output: model ? extractText(payloads) : null,
+        toolCalls: model ? extractToolCalls(payloads) : [],
         requestBody,
         responseText,
         signature: `${s.request.method} ${host}${path.split('?')[0]}`,

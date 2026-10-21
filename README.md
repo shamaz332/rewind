@@ -141,21 +141,60 @@ The UI listens on `127.0.0.1` only. It has no external requests or CDN, so it wo
 
 ## Use it in tests
 
-```ts
-import { test, expect } from 'vitest';
-import { rewind } from 'rewindjs';
+`recordTest` works like snapshots for agent runs. The first run records, and every run after replays: offline, in milliseconds, for $0.
 
-test('agent books the cheapest flight', async () => {
-  const result = await rewind.auto('book-flight', () => agent.run('Book me a flight to Lisbon'));
-  expect(result.booking.price).toBeLessThan(300);
+```ts
+// vitest: import from 'rewindjs/vitest'   ·   jest: import from 'rewindjs/jest'
+import { test, expect } from 'vitest';
+import { recordTest } from 'rewindjs/vitest';
+
+test('books the cheapest flight', async () => {
+  const run = await recordTest(() => agent.run('Book me a flight to Lisbon'));
+
+  expect(run.value.booking.price).toBeLessThan(300);
+  expect(run).toCallToolsInOrder(['search_flights', 'book_flight']);
+  expect(run).not.toHaveCalledTool('cancel_booking');
+  expect(run).toHaveLLMCalls({ max: 4 });
+  expect(run).toStayWithinTokens(5_000); // fails the build when a prompt change blows the budget
+  expect(run).toHaveNoFailedRequests();
 });
 ```
 
-`auto` records on the first run and replays afterwards. Refresh all recordings with:
+- Recordings are named after the test and stored in `__recordings__/<test file>/` next to it. Commit them.
+- Refresh them with `REWIND_MODE=record npm test`.
+- **In CI, a missing recording fails the test** instead of quietly calling paid APIs.
+- When a replay diverges, rewind saves what the run actually did as `<name>.failed.rewind.json`. `npx rewind diff <name> <name>.failed` shows where it went off track.
 
-```bash
-REWIND_MODE=record npm test
+Importing `rewindjs/vitest` or `rewindjs/jest` registers the matchers (with TypeScript types). Outside tests, `rewind.capture(name, fn)` does the same as `recordTest`: it returns `{ value, recording, mode }`, and the matchers accept that.
+
+| Matcher | Passes when |
+|---|---|
+| `toHaveCalledTool(name)` | the model asked to call `name` at least once |
+| `toCallToolsInOrder(names)` | the model called these tools in this order (others may come in between) |
+| `toStayWithinTokens(max, { count? })` | total (or `input`/`output`) tokens are at most `max`; the failure message names the largest calls |
+| `toHaveLLMCalls(n \| { min, max })` | the number of LLM calls matches |
+| `toHaveNoFailedRequests()` | no network errors and no HTTP 4xx/5xx |
+
+Tool calls and tokens are read from Anthropic, OpenAI (Chat Completions and Responses) and Gemini responses, streamed or not.
+
+## In CI
+
+```yaml
+# .github/workflows/test.yml
+- run: npm test
+- uses: YOUR_GITHUB_USER/rewind@v0 # adds a job summary and uploads failed runs
+  if: always()
 ```
+
+When a replay diverges, the job summary shows which recording, at which step, and what changed:
+
+> ❌ **1 agent run diverged from its recording**
+>
+> | Recording | Diverged at | What changed |
+> |---|---|---|
+> | `books-cheapest-flight` | step 1 · `POST api.anthropic.com/v1/messages` | `$.messages[0].content`: `"Find flights to Lisbon"` → `"Find flights to Lisbon in May"` |
+
+The failed runs are uploaded as the `rewind-failures` artifact. Inputs: `path` (where to look, default `.`), `artifact-name`, `version`, `fail-on-divergence`. Without GitHub Actions, run `npx rewind report >> "$GITHUB_STEP_SUMMARY"`, or use `npx rewind report --json` with any CI.
 
 ## API
 
@@ -167,6 +206,9 @@ Runs `fn` with every `fetch` answered from the recording. Throws `ReplayDivergen
 
 ### `fork(name, fn, options?)`
 Replays `name` up to step `at`, then runs live. Saves the run as its own recording that `replay()` reproduces. Options: `at` (default: go live when the recording runs out), `saveAs` (name, or `false`), `patchRequest`, `patchResponse`, plus the record and replay options. Returns `{ value, replayed, live, liveFrom, reason, savedAs }`.
+
+### `capture(name, fn, options?)`
+Like `auto`, but returns `{ value, recording, mode }` for assertions. In CI, a missing recording is an error unless `REWIND_MODE=record`.
 
 ### `auto(name, fn, options?)`
 Replays if the recording exists, otherwise records. `REWIND_MODE=record|replay|auto` overrides.
@@ -187,6 +229,7 @@ Returns the parsed recording for inspection.
 | `speed` | replay | `1` | Playback multiplier for `timing: 'original'` |
 | `strict` | replay | `false` | Fail if recorded steps were never used |
 | `passthrough` | replay | | `(url: URL) => boolean`: send matching requests to the real network |
+| `saveFailures` | replay | `true` | Save `<name>.failed` when a replay diverges |
 
 ### How matching works
 A request matches a recorded one by **method + URL + body**. Query parameters are compared regardless of order, JSON bodies regardless of key order, and secrets are redacted before comparing. Headers are not compared, so a rotated API key never breaks a replay.
@@ -220,7 +263,8 @@ const client = new Anthropic({ fetch: rewind.fetch });
 - [x] **Phase 3**: `fork()`: replay up to a step, then go live, with request/response patching
 - [x] **Phase 4**: CLI: `rewind ls`, `show`, `diff`, `prune`; token usage and costs for Anthropic, OpenAI and Gemini
 - [x] **Phase 5**: `npx rewind ui`: timeline you can scrub, side-by-side diffs, fork from the browser
-- [ ] **Phase 6**: Vitest/Jest matchers, GitHub Action, Python port
+- [x] **Phase 6**: `recordTest` and matchers for Vitest/Jest, failed-run capture, `rewind report`, GitHub Action
+- [ ] Python port
 
 ## License
 

@@ -130,6 +130,31 @@ export function extractText(payloads: Obj[]): string | null {
   }
 }
 
+/** Names of the tools the model asked to call, in order. */
+export function extractToolCalls(payloads: Obj[]): string[] {
+  const names: string[] = [];
+  const add = (v: unknown) => {
+    if (typeof v === 'string' && v) names.push(v);
+  };
+  for (const p of payloads) {
+    if (p.type === 'message') for (const b of arr(p.content)) if (isObj(b) && b.type === 'tool_use') add(b.name);
+    if (p.type === 'content_block_start' && isObj(p.content_block) && p.content_block.type === 'tool_use') add(p.content_block.name);
+    for (const c of arr(p.choices)) {
+      if (!isObj(c)) continue;
+      const m = isObj(c.message) ? c.message : isObj(c.delta) ? c.delta : null;
+      // Streamed OpenAI tool calls repeat per chunk; only the chunk carrying the name counts.
+      if (m) for (const t of arr(m.tool_calls)) if (isObj(t) && isObj(t.function)) add(t.function.name);
+    }
+    if (p.object === 'response') for (const o of arr(p.output)) if (isObj(o) && o.type === 'function_call') add(o.name);
+    if (p.type === 'response.output_item.done' && isObj(p.item) && p.item.type === 'function_call') add(p.item.name);
+    for (const c of arr(p.candidates)) {
+      if (!isObj(c) || !isObj(c.content)) continue;
+      for (const part of arr(c.content.parts)) if (isObj(part) && isObj(part.functionCall)) add(part.functionCall.name);
+    }
+  }
+  return names;
+}
+
 export function extractModel(requestBody: unknown, payloads: Obj[], url: string): string | null {
   if (isObj(requestBody) && str(requestBody.model)) return requestBody.model as string;
   for (const p of payloads) {

@@ -1,0 +1,61 @@
+name: rewind report
+description: Summarize agent runs that diverged from their rewind recordings, and upload them as an artifact.
+author: Shamaz saeed
+branding:
+  icon: rewind
+  color: purple
+
+inputs:
+  path:
+    description: Directory to search for recordings (recursively; node_modules is skipped).
+    default: .
+  artifact-name:
+    description: Name of the artifact holding the failed runs.
+    default: rewind-failures
+  version:
+    description: rewindjs version to run. Defaults to the one installed in the project, falling back to the latest.
+    default: ''
+  fail-on-divergence:
+    description: Fail this step when a run diverged. Usually the test step has already failed, so this defaults to false.
+    default: 'false'
+
+outputs:
+  failures:
+    description: Number of runs that diverged from their recordings.
+    value: ${{ steps.report.outputs.failures }}
+
+runs:
+  using: composite
+  steps:
+    - id: report
+      shell: bash
+      env:
+        REWIND_PATH: ${{ inputs.path }}
+        REWIND_VERSION: ${{ inputs.version }}
+        REWIND_FAIL: ${{ inputs.fail-on-divergence }}
+      run: |
+        set -euo pipefail
+        if [ -n "$REWIND_VERSION" ]; then
+          cmd=(npx --yes "rewindjs@$REWIND_VERSION")
+        elif [ -x node_modules/.bin/rewind ]; then
+          cmd=(node_modules/.bin/rewind)
+        else
+          cmd=(npx --yes rewindjs@latest)
+        fi
+        "${cmd[@]}" report "$REWIND_PATH" >> "$GITHUB_STEP_SUMMARY"
+        failures=$("${cmd[@]}" report "$REWIND_PATH" --json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).failures.length))')
+        echo "failures=$failures" >> "$GITHUB_OUTPUT"
+        if [ "$failures" != "0" ]; then
+          echo "::warning title=rewind::$failures agent run(s) diverged from their recordings. See the job summary and the rewind-failures artifact."
+          if [ "$REWIND_FAIL" = "true" ]; then exit 1; fi
+        fi
+
+    - if: steps.report.outputs.failures != '0'
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: |
+          ${{ inputs.path }}/**/*.failed.rewind.json
+          !${{ inputs.path }}/**/node_modules/**
+        if-no-files-found: ignore
+        retention-days: 14

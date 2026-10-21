@@ -30,6 +30,7 @@ Usage
   rewind diff <a> <b>               Compare two runs step by step
   rewind prune --older-than 30d     Delete old recordings
   rewind ui                         Open the timeline viewer in your browser
+  rewind report [paths...]          Markdown summary of failed replays, for CI job summaries
 
 Options
   --dir <path>        Recordings directory (default: .rewind)
@@ -104,6 +105,8 @@ export async function main(argv: string[], io: IO = defaultIO()): Promise<number
         return await prune(o.dir, o['older-than'], o['dry-run'], io, c);
       case 'ui':
         return await ui(o, pricing, io, c);
+      case 'report':
+        return await report(args.length ? args : ['.'], pricing, o, io);
       default:
         throw new UsageError(`unknown command "${cmd}"`);
     }
@@ -298,8 +301,10 @@ function diff(
         const [l, rr] = previewPair(r.left, r.right);
         io.out(`${indent}${c.dim('request')}  ${r.path}: ${c.red(l)} → ${c.green(rr)}`);
       }
-      if (s.a.status !== s.b.status) io.out(`${indent}${c.dim('status')}   ${c.red(String(s.a.status ?? s.a.error))} → ${c.green(String(s.b.status ?? s.b.error))}`);
-      if (s.responseChanged && (s.a.output || s.b.output) && s.a.output !== s.b.output) {
+      if (s.a.status !== s.b.status) io.out(`${indent}${c.dim('status')}   ${c.red(statusOrError(s.a))} → ${c.green(statusOrError(s.b))}`);
+      if (s.a.error || s.b.error) {
+        // A failed request has no output to compare; the status line already says what happened.
+      } else if (s.responseChanged && (s.a.output || s.b.output) && s.a.output !== s.b.output) {
         io.out(`${indent}${c.dim('output')}   ${c.red(truncate(oneLine(s.a.output ?? ''), outputWidth))}`);
         io.out(`${indent}         ${c.green(truncate(oneLine(s.b.output ?? ''), outputWidth))}`);
       } else if (s.response.length) {
@@ -361,6 +366,122 @@ async function prune(dir: string, olderThan: string | undefined, dryRun: boolean
   }
   io.out(count ? `${dryRun ? 'Would free' : 'Freed'} ${bytes(freed)} in ${count} recording(s).` : `No recordings older than ${olderThan}.`);
   return 0;
+}
+
+// ─── report ──────────────────────────────────────────────────────────────────
+
+const SKIP_DIRS = new Set(['node_modules', '.git']);
+
+async function findAllRecordings(roots: string[]): Promise<string[]> {
+  const out: string[] = [];
+  const walk = async (d: string) => {
+    let entries;
+    try {
+      entries = await readdir(d, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const p = join(d, e.name);
+      if (e.isDirectory()) {
+        if (!SKIP_DIRS.has(e.name)) await walk(p);
+      } else if (e.name.endsWith('.rewind.json')) out.push(p);
+    }
+  };
+  for (const r of roots) {
+    if (r.endsWith('.rewind.json')) out.push(resolve(r));
+    else await walk(resolve(r));
+  }
+  return [...new Set(out)].sort();
+}
+
+/** The "what changed" part of a divergence message, as one short line. */
+function divergenceReason(message: string): string {
+  const m = /First difference at (\S+):\n\s+recorded: (.*)\n\s+now:\s+(.*)/.exec(message);
+  if (m) return `\`${m[1]}\`: \`${m[2]}\` → \`${m[3]}\``;
+  const line = message.split('\n')[1]?.trim();
+  return line ?? message.split('\n')[0]!;
+}
+
+async function report(
+  roots: string[],
+  pricing: Pricing | null,
+  o: { json: boolean; 'exit-code': boolean },
+  io: IO,
+): Promise<number> {
+  const files = await findAllRecordings(roots);
+  const failures: { name: string; dir: string; file: string; step: number; target: string; reason: string; message: string }[] = [];
+  const totals = { recordings: 0, llmCalls: 0, steps: 0, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } as Usage, cost: null as number | null };
+
+  for (const file of files) {
+    let rec: Recording;
+    try {
+      rec = JSON.parse(await readFile(file, 'utf8')) as Recording;
+      if (rec.format !== FORMAT) continue;
+    } catch {
+      continue;
+    }
+    const dir = relative(process.cwd(), join(file, '..')) || '.';
+    if (rec.failure) {
+      const step = rec.steps[rec.failure.step];
+      let target = '';
+      if (step) {
+        try {
+          const u = new URL(step.request.url);
+          target = `${step.request.method} ${u.host}${u.pathname}`;
+        } catch {
+          target = `${step.request.method} ${step.request.url}`;
+        }
+      }
+      failures.push({ name: rec.failure.from, dir, file: relative(process.cwd(), file), step: rec.failure.step, target, reason: divergenceReason(rec.failure.message), message: rec.failure.message });
+      continue;
+    }
+    const s = summarize(rec, pricing);
+    totals.recordings++;
+    totals.steps += s.totals.steps;
+    totals.llmCalls += s.totals.llmCalls;
+    for (const k of Object.keys(totals.usage) as (keyof Usage)[]) totals.usage[k] += s.totals.usage[k];
+    if (s.totals.cost !== null) totals.cost = (totals.cost ?? 0) + s.totals.cost;
+  }
+
+  if (o.json) {
+    io.out(JSON.stringify({ failures, totals }, null, 2));
+    return failures.length && o['exit-code'] ? 1 : 0;
+  }
+
+  const cell = (s: string) => s.replace(/\|/g, '\\|').replace(/\n/g, ' ');
+  const lines: string[] = ['### ⏪ rewind', ''];
+  if (failures.length) {
+    lines.push(`❌ **${failures.length} agent run${failures.length === 1 ? '' : 's'} diverged from ${failures.length === 1 ? 'its recording' : 'their recordings'}**`, '');
+    lines.push('| Recording | Diverged at | What changed |', '|---|---|---|');
+    for (const f of failures) {
+      lines.push(`| \`${cell(f.name)}\`<br><sub>${cell(f.dir)}</sub> | step ${f.step} · \`${cell(f.target)}\` | ${cell(f.reason)} |`);
+    }
+    const f = failures[0]!;
+    const dirFlag = f.dir === '.rewind' ? '' : ` --dir ${f.dir}`;
+    lines.push(
+      '',
+      'Each failed run is saved next to its recording as `<name>.failed.rewind.json`. To see the whole run locally:',
+      '',
+      '```bash',
+      `npx rewind diff ${f.name} ${f.name}.failed${dirFlag}`,
+      '```',
+      '',
+      'If the change is intended, re-record with `REWIND_MODE=record` and commit the new recordings.',
+    );
+  } else {
+    lines.push(`✅ **No diverged runs.** ${totals.recordings} recording${totals.recordings === 1 ? '' : 's'} checked.`);
+  }
+  const tokenLine = tokens(totals.usage);
+  lines.push(
+    '',
+    `<sub>${totals.recordings} recordings · ${totals.steps} requests · ${totals.llmCalls} LLM calls` +
+      (tokenLine ? ` · ${tokenLine} tokens replayed` : '') +
+      (totals.cost !== null ? ` · ${money(totals.cost)} of API calls replayed for free` : '') +
+      '</sub>',
+  );
+  io.out(lines.join('\n'));
+  return failures.length && o['exit-code'] ? 1 : 0;
 }
 
 async function ui(
@@ -507,6 +628,12 @@ function status(st: StepSummary, c?: Colors): string {
   const s = st.error ? 'ERR' : st.status === null ? '…' : String(st.status);
   const marked = st.truncated ? `${s}!` : s;
   return c && (st.error || (st.status ?? 0) >= 400) ? c.red(marked) : marked;
+}
+
+function statusOrError(st: StepSummary): string {
+  if (st.status !== null) return String(st.status);
+  if (!st.error) return '…';
+  return st.error.startsWith('Replay diverged') ? 'replay diverged here' : truncate(st.error.split('\n')[0]!, 80);
 }
 
 function forkLine(f: NonNullable<Recording['fork']>): string {
