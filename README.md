@@ -182,7 +182,7 @@ Tool calls and tokens are read from Anthropic, OpenAI (Chat Completions and Resp
 ```yaml
 # .github/workflows/test.yml
 - run: npm test
-- uses: YOUR_GITHUB_USER/rewind@v0 # adds a job summary and uploads failed runs
+- uses: shamaz332/rewind@v0 # adds a job summary and uploads failed runs
   if: always()
 ```
 

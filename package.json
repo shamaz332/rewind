@@ -1,6 +1,6 @@
 {
   "name": "rewindjs",
-  "version": "0.1.0-alpha.0",
+  "version": "0.1.0",
   "description": "Record and deterministically replay AI agent runs. Debug the failure at step 31 without paying for steps 1-30 again.",
   "keywords": [
     "ai",
@@ -17,6 +17,14 @@
   ],
   "license": "MIT",
   "author": "Shamaz saeed",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shamaz332/rewind.git"
+  },
+  "homepage": "https://github.com/shamaz332/rewind#readme",
+  "bugs": {
+    "url": "https://github.com/shamaz332/rewind/issues"
+  },
   "type": "module",
   "sideEffects": true,
   "engines": {
@@ -78,6 +86,6 @@
     "@mswjs/interceptors": "^0.41.9"
   },
   "bin": {
-    "rewind": "./dist/cli.js"
+    "rewind": "dist/cli.js"
   }
 }
