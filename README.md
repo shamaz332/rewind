@@ -109,6 +109,36 @@ rewind understands **Anthropic, OpenAI (Chat Completions and Responses) and Gemi
 
 The same analysis is available from code: `summarize(recording)`, `diffRecordings(a, b)`.
 
+## Timeline viewer
+
+```bash
+npx rewind ui
+```
+
+This opens a local web app with every recording:
+
+- **Run view:** a waterfall timeline of every request, including parallel ones. Scrub with the slider or <kbd>↑</kbd>/<kbd>↓</kbd>, and inspect any step's model output, request, response and headers.
+- **Compare view:** two runs side by side, aligned step by step, with the changed fields listed above both versions.
+- **Fork from here:** select a step, edit its request body in the browser (for example the system prompt), and run the fork live. You land on a diff of the original run against the fork.
+
+To fork from the UI, tell it how to run your agent in `rewind.config.mjs`:
+
+```js
+// rewind.config.mjs
+import { runAgent } from './src/agent.js';
+
+export default {
+  agents: {
+    'book-flight': () => runAgent('Book me a flight to Lisbon'),
+    'checkout-*': () => runCheckoutAgent(), // a trailing * matches by prefix
+  },
+};
+```
+
+Forks of a recording use the same agent. Without a config, the button shows the code to run the fork yourself.
+
+The UI listens on `127.0.0.1` only. It has no external requests or CDN, so it works offline. Because it can run your agent, and live steps cost money, every API call needs a token that is generated at each launch and included in the printed link. Requests from other sites are rejected by `Host` checks. Options: `--port`, `--config`, `--no-open`, `--dir`.
+
 ## Use it in tests
 
 ```ts
@@ -189,7 +219,7 @@ const client = new Anthropic({ fetch: rewind.fetch });
 - [x] **Phase 2**: deterministic `Date`, `Math.random()`, `crypto.randomUUID()`; `node:http` interception; concurrent sessions via `AsyncLocalStorage`
 - [x] **Phase 3**: `fork()`: replay up to a step, then go live, with request/response patching
 - [x] **Phase 4**: CLI: `rewind ls`, `show`, `diff`, `prune`; token usage and costs for Anthropic, OpenAI and Gemini
-- [ ] **Phase 5**: `npx rewind ui`, a local timeline viewer you can scrub through
+- [x] **Phase 5**: `npx rewind ui`: timeline you can scrub, side-by-side diffs, fork from the browser
 - [ ] **Phase 6**: Vitest/Jest matchers, GitHub Action, Python port
 
 ## License

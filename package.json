@@ -35,13 +35,14 @@
         "types": "./dist/index.d.cts",
         "default": "./dist/index.cjs"
       }
-    }
+    },
+    "./package.json": "./package.json"
   },
   "files": [
     "dist"
   ],
   "scripts": {
-    "build": "tsup",
+    "build": "tsup && node -e \"require('fs').cpSync('src/ui/app.html','dist/ui/app.html')\"",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",

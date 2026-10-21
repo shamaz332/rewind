@@ -74,7 +74,7 @@ export class Forker implements Session {
     const patched = this.opts.patchRequest ? await runInternal(() => patchRequest(req, this.opts.patchRequest!, step)) : null;
     return this.recorder.fetch(req, () => realFetch(patched ?? req), via, {
       source: 'live',
-      ...(patched ? { patched: true as const } : {}),
+      ...(patched ? { patched: true as const, sentRequest: patched } : {}),
     });
   }
 

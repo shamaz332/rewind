@@ -84,12 +84,17 @@ export class Recorder implements Session {
     req: Request,
     realFetch: RealFetch,
     via: Transport,
-    meta: Pick<FetchStep, 'source' | 'patched'> = {},
+    meta: Pick<FetchStep, 'source' | 'patched'> & { sentRequest?: Request } = {},
   ): Promise<Response> {
     const seq = this.seq++;
     const startedAt = this.elapsed();
+    const { sentRequest, ...stepMeta } = meta;
     const { recorded } = await runInternal(() => describeRequest(req, this.opts, this.blobs));
-    const step: FetchStep = { seq, kind: 'fetch', via, startedAt, durationMs: 0, request: recorded, ...meta };
+    const step: FetchStep = { seq, kind: 'fetch', via, startedAt, durationMs: 0, request: recorded, ...stepMeta };
+    if (sentRequest) {
+      const sent = await runInternal(() => describeRequest(sentRequest, this.opts, this.blobs));
+      if (sent.recorded.body) step.sentBody = sent.recorded.body;
+    }
     this.steps.push(step);
 
     let res: Response;

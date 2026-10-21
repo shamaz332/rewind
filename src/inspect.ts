@@ -32,6 +32,8 @@ export interface StepSummary {
   /** Identity of the request for diffing: method, host and path. */
   signature: string;
   matchKey: string;
+  /** Blob hash of the body actually sent (differs from the matched one for patched fork steps). */
+  sentHash: string | null;
   responseHash: string | null;
 }
 
@@ -59,7 +61,7 @@ export function summarize(rec: Recording, pricing: Pricing | null = null): Recor
   const steps = [...rec.steps]
     .sort((a, b) => a.seq - b.seq)
     .map((s): StepSummary => {
-      const reqText = text(s.request.body);
+      const reqText = text(s.sentBody ?? s.request.body);
       const requestBody = parseMaybeJson(reqText);
       const responseText = text(s.response?.body ?? null);
       const payloads = parsePayloads(responseText);
@@ -98,6 +100,7 @@ export function summarize(rec: Recording, pricing: Pricing | null = null): Recor
         responseText,
         signature: `${s.request.method} ${host}${path.split('?')[0]}`,
         matchKey: s.request.matchKey,
+        sentHash: s.sentBody ?? s.request.body,
         responseHash: s.response?.body ?? null,
       };
     });

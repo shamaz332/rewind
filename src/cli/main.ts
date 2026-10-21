@@ -29,6 +29,7 @@ Usage
   rewind show <name> [--step N]     Timeline of a run, or one step in detail
   rewind diff <a> <b>               Compare two runs step by step
   rewind prune --older-than 30d     Delete old recordings
+  rewind ui                         Open the timeline viewer in your browser
 
 Options
   --dir <path>        Recordings directory (default: .rewind)
@@ -38,6 +39,9 @@ Options
   --headers           (show --step) Include headers
   --exit-code         (diff) Exit with 1 when the runs differ
   --dry-run           (prune) List what would be deleted
+  --port <n>          (ui) Port to listen on (default: 4242)
+  --config <file>     (ui) Agents the UI may fork (default: rewind.config.mjs if present)
+  --no-open           (ui) Do not open a browser
   -h, --help          Show this help
 
 <name> is a recording name (e.g. checkout-bug) or a path to a .rewind.json file.`;
@@ -58,6 +62,9 @@ export async function main(argv: string[], io: IO = defaultIO()): Promise<number
         'exit-code': { type: 'boolean', default: false },
         'older-than': { type: 'string' },
         'dry-run': { type: 'boolean', default: false },
+        port: { type: 'string' },
+        config: { type: 'string' },
+        'no-open': { type: 'boolean', default: false },
         help: { type: 'boolean', short: 'h', default: false },
         version: { type: 'boolean', short: 'v', default: false },
       },
@@ -95,6 +102,8 @@ export async function main(argv: string[], io: IO = defaultIO()): Promise<number
       }
       case 'prune':
         return await prune(o.dir, o['older-than'], o['dry-run'], io, c);
+      case 'ui':
+        return await ui(o, pricing, io, c);
       default:
         throw new UsageError(`unknown command "${cmd}"`);
     }
@@ -352,6 +361,47 @@ async function prune(dir: string, olderThan: string | undefined, dryRun: boolean
   }
   io.out(count ? `${dryRun ? 'Would free' : 'Freed'} ${bytes(freed)} in ${count} recording(s).` : `No recordings older than ${olderThan}.`);
   return 0;
+}
+
+async function ui(
+  o: { dir: string; port?: string; config?: string; 'no-open': boolean },
+  pricing: Pricing | null,
+  io: IO,
+  c: Colors,
+): Promise<number> {
+  const port = o.port === undefined ? 4242 : Number(o.port);
+  if (!Number.isInteger(port) || port < 0 || port > 65535) throw new UsageError(`--port must be a port number, got "${o.port}"`);
+  const { startUi } = await import('../ui/server.js');
+  let server;
+  try {
+    server = await startUi({ dir: o.dir, port, pricing, ...(o.config ? { configPath: o.config } : {}) });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'EADDRINUSE') throw new Error(`port ${port} is in use; pick another with --port`);
+    throw err;
+  }
+  io.out(`${c.bold('rewind ui')} running at ${c.cyan(server.url)}`);
+  io.out(c.dim(`Serving ${resolve(o.dir)}. The link includes an access token; press Ctrl+C to stop.`));
+  if (!o['no-open']) openBrowser(server.url);
+  await new Promise<void>((done) => {
+    const stop = () => done();
+    process.once('SIGINT', stop);
+    process.once('SIGTERM', stop);
+  });
+  await server.close();
+  // The user's config may have left servers or timers running; the UI is done either way.
+  process.exit(0);
+}
+
+function openBrowser(url: string): void {
+  const cmd = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'cmd' : 'xdg-open';
+  const args = process.platform === 'win32' ? ['/c', 'start', '', url] : [url];
+  import('node:child_process')
+    .then(({ spawn }) => {
+      const child = spawn(cmd, args, { stdio: 'ignore', detached: true });
+      child.on('error', () => {});
+      child.unref();
+    })
+    .catch(() => {});
 }
 
 // ─── loading ─────────────────────────────────────────────────────────────────

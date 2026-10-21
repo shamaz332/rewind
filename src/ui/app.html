@@ -1,0 +1,609 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rewind</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%237c6cf0' d='M11 6v12l-8.5-6L11 6zm1 6l8.5 6V6L12 12z'/%3E%3C/svg%3E">
+<style>
+:root {
+  --bg: #fbfbfc; --panel: #ffffff; --panel-2: #f4f4f7; --line: #e4e4ea; --line-2: #d4d4dd;
+  --text: #1b1b22; --muted: #6b6b7b; --faint: #9a9aa8;
+  --accent: #6a5ae0; --accent-soft: #ecebfd; --accent-text: #ffffff;
+  --ok: #1f8a4c; --ok-soft: #e3f4ea; --bad: #c8343a; --bad-soft: #fbe7e8; --warn: #a96500; --warn-soft: #fbf0dc;
+  --bar-llm: #6a5ae0; --bar-tool: #8d93a5; --bar-err: #c8343a;
+  --code-key: #6a3fb5; --code-str: #1f7a4a; --code-num: #a3540b; --code-lit: #b0296d;
+  --shadow: 0 1px 2px rgba(20,20,40,.06), 0 4px 16px rgba(20,20,40,.06);
+  --mono: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Consolas, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111116; --panel: #17171e; --panel-2: #1e1e27; --line: #2a2a35; --line-2: #383845;
+    --text: #e8e8ef; --muted: #9b9bab; --faint: #6c6c7c;
+    --accent: #8f82ff; --accent-soft: #26233f; --accent-text: #111116;
+    --ok: #4cc583; --ok-soft: #15291f; --bad: #ff6b70; --bad-soft: #321a1d; --warn: #f0a83c; --warn-soft: #30250f;
+    --bar-llm: #8f82ff; --bar-tool: #6f7489; --bar-err: #ff6b70;
+    --code-key: #c3a6ff; --code-str: #7fd6a2; --code-num: #f3b36b; --code-lit: #ff8cc3;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 4px 16px rgba(0,0,0,.3);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111116; --panel: #17171e; --panel-2: #1e1e27; --line: #2a2a35; --line-2: #383845;
+  --text: #e8e8ef; --muted: #9b9bab; --faint: #6c6c7c;
+  --accent: #8f82ff; --accent-soft: #26233f; --accent-text: #111116;
+  --ok: #4cc583; --ok-soft: #15291f; --bad: #ff6b70; --bad-soft: #321a1d; --warn: #f0a83c; --warn-soft: #30250f;
+  --bar-llm: #8f82ff; --bar-tool: #6f7489; --bar-err: #ff6b70;
+  --code-key: #c3a6ff; --code-str: #7fd6a2; --code-num: #f3b36b; --code-lit: #ff8cc3;
+  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 4px 16px rgba(0,0,0,.3);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg); color: var(--text); font: 14px/1.45 var(--sans); }
+button, input, select, textarea { font: inherit; color: inherit; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+.muted { color: var(--muted); }
+.mono { font-family: var(--mono); font-size: 12.5px; }
+
+.top { display: flex; align-items: center; gap: 14px; height: 48px; padding: 0 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.brand { display: flex; align-items: center; gap: 8px; font-weight: 650; letter-spacing: -.01em; }
+.brand svg { width: 18px; height: 18px; fill: var(--accent); }
+.top .dir { color: var(--muted); font: 12px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
+.icon-btn { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; height: 30px; padding: 0 10px; cursor: pointer; color: var(--muted); }
+.icon-btn:hover { color: var(--text); border-color: var(--line-2); }
+
+.layout { display: grid; grid-template-columns: 290px minmax(0, 1fr); height: calc(100% - 48px); }
+aside { border-right: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+.search { padding: 10px; border-bottom: 1px solid var(--line); }
+.search input { width: 100%; height: 32px; border: 1px solid var(--line); border-radius: 8px; padding: 0 10px; background: var(--panel-2); outline: none; }
+.search input:focus { border-color: var(--accent); }
+.list { overflow: auto; flex: 1; padding: 6px; }
+.rec { display: block; padding: 8px 10px; border-radius: 8px; cursor: pointer; color: var(--text); }
+.rec:hover { background: var(--panel-2); text-decoration: none; }
+.rec.active { background: var(--accent-soft); }
+.rec .name { font-weight: 560; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; gap: 6px; align-items: center; }
+.rec .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.badge { display: inline-block; font-size: 10.5px; font-weight: 600; padding: 1px 6px; border-radius: 99px; background: var(--panel-2); color: var(--muted); border: 1px solid var(--line); white-space: nowrap; }
+.badge.fork { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+.badge.live { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
+.badge.err { background: var(--bad-soft); color: var(--bad); border-color: transparent; }
+.badge.warn { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+
+main { overflow: auto; min-width: 0; }
+.page { padding: 20px 24px 40px; max-width: 1400px; }
+.empty { display: grid; place-items: center; height: 100%; color: var(--muted); text-align: center; padding: 24px; }
+.empty code { font-family: var(--mono); background: var(--panel-2); padding: 2px 6px; border-radius: 6px; }
+
+.head { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
+.head h1 { margin: 0; font-size: 20px; letter-spacing: -.015em; word-break: break-all; }
+.head .grow { flex: 1; min-width: 200px; }
+.stats { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.stat { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 4px 9px; font-size: 12.5px; }
+.stat b { font-weight: 620; }
+.note { font-size: 13px; color: var(--muted); margin-top: 8px; }
+.actions { display: flex; gap: 8px; align-items: center; }
+select, .btn { height: 32px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); padding: 0 10px; cursor: pointer; }
+.btn:hover, select:hover { border-color: var(--line-2); }
+.btn.primary { background: var(--accent); color: var(--accent-text); border-color: transparent; font-weight: 600; }
+.btn.primary:hover { filter: brightness(1.06); }
+.btn:disabled { opacity: .55; cursor: default; }
+
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); }
+.scrub { display: flex; align-items: center; gap: 8px 12px; padding: 10px 14px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.scrub input { min-width: 160px; }
+.scrub input { flex: 1; accent-color: var(--accent); }
+.scrub .pos { font: 12px var(--mono); color: var(--muted); min-width: 92px; text-align: right; }
+.legend { display: flex; gap: 12px; font-size: 12px; color: var(--muted); }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+
+.wf { max-height: 46vh; overflow: auto; }
+.wf-row { display: grid; grid-template-columns: 44px 30px 58px minmax(140px, 1.3fr) 54px minmax(90px, .7fr) 120px minmax(160px, 1.4fr); align-items: center; gap: 8px; padding: 0 14px; height: 32px; border-bottom: 1px solid var(--line); cursor: pointer; font-size: 12.5px; }
+.wf-row:last-child { border-bottom: 0; }
+.wf-row:hover { background: var(--panel-2); }
+.wf-row.sel { background: var(--accent-soft); }
+.wf-row.head-row { position: sticky; top: 0; background: var(--panel); color: var(--faint); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; cursor: default; z-index: 1; }
+.wf-row > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wf-row .seq { font-family: var(--mono); color: var(--muted); }
+.wf-row .tgt { font-family: var(--mono); font-size: 12px; }
+.wf-row .st-bad { color: var(--bad); font-weight: 600; }
+.track { position: relative; height: 12px; background: var(--panel-2); border-radius: 4px; }
+.bar { position: absolute; top: 0; height: 12px; border-radius: 4px; min-width: 3px; background: var(--bar-tool); }
+.bar.llm { background: var(--bar-llm); }
+.bar.err { background: var(--bar-err); }
+.bar.replayed { opacity: .45; }
+
+.detail { margin-top: 16px; }
+.detail-head { padding: 12px 16px; border-bottom: 1px solid var(--line); display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.detail-head .title { font: 600 13px var(--mono); word-break: break-all; flex: 1; min-width: 200px; }
+.meta-line { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; font-size: 12.5px; color: var(--muted); }
+.tabs { display: flex; gap: 2px; padding: 0 12px; border-bottom: 1px solid var(--line); overflow-x: auto; }
+.tab { border: 0; background: none; padding: 10px 10px 9px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; white-space: nowrap; }
+.tab.on { color: var(--text); border-bottom-color: var(--accent); }
+.tab-body { padding: 14px 16px; }
+pre.code { margin: 0; font: 12.5px/1.55 var(--mono); white-space: pre-wrap; word-break: break-word; max-height: 60vh; overflow: auto; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+.output { white-space: pre-wrap; font-size: 14px; line-height: 1.6; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
+.k { color: var(--code-key); } .s { color: var(--code-str); } .n { color: var(--code-num); } .l { color: var(--code-lit); }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; font: 12.5px var(--mono); }
+.kv .key { color: var(--muted); }
+.section-title { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--faint); margin: 14px 0 6px; font-weight: 600; }
+.section-title:first-child { margin-top: 0; }
+
+.drows .drow { display: grid; grid-template-columns: 44px 44px 22px minmax(0, 1fr); gap: 8px; padding: 7px 14px; border-bottom: 1px solid var(--line); cursor: pointer; align-items: start; }
+.drow:hover { background: var(--panel-2); }
+.drow.sel { background: var(--accent-soft); }
+.drow .seq { font: 12px var(--mono); color: var(--muted); padding-top: 1px; }
+.drow .sig { font: 12.5px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drow .sum { grid-column: 4; font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drow.same .sig { color: var(--muted); }
+.mark { font: 700 13px var(--mono); text-align: center; }
+.mark.same { color: var(--faint); } .mark.changed { color: var(--warn); } .mark.added { color: var(--ok); } .mark.removed { color: var(--bad); }
+.del { color: var(--bad); } .ins { color: var(--ok); }
+.sides { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.side-label { font-size: 12px; font-weight: 600; margin-bottom: 6px; }
+.difflist { font: 12.5px var(--mono); display: grid; gap: 4px; }
+.difflist div { overflow-wrap: anywhere; }
+
+dialog { border: 1px solid var(--line); border-radius: 14px; background: var(--panel); color: var(--text); padding: 0; width: min(760px, calc(100vw - 32px)); box-shadow: var(--shadow); }
+dialog::backdrop { background: rgba(10,10,20,.45); }
+.dlg-head { padding: 16px 18px 6px; }
+.dlg-head h2 { margin: 0 0 4px; font-size: 17px; }
+.dlg-body { padding: 8px 18px; }
+.dlg-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 18px 16px; align-items: center; }
+.dlg-foot .msg { flex: 1; font-size: 13px; }
+textarea.edit { width: 100%; min-height: 260px; font: 12.5px/1.5 var(--mono); background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 10px; resize: vertical; outline: none; }
+textarea.edit:focus { border-color: var(--accent); }
+.callout { background: var(--warn-soft); color: var(--text); border-radius: 8px; padding: 9px 12px; font-size: 13px; }
+.error { color: var(--bad); }
+kbd { font: 11px var(--mono); border: 1px solid var(--line-2); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; color: var(--muted); }
+
+@media (max-width: 860px) {
+  .layout { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  aside { max-height: 34vh; border-right: 0; border-bottom: 1px solid var(--line); }
+  .page { padding: 16px; }
+  .wf-row { grid-template-columns: 36px 52px minmax(0, 1fr) 46px minmax(80px, .8fr); }
+  .wf-row .c-src, .wf-row .c-model, .wf-row .c-tok { display: none; }
+  .sides { grid-template-columns: 1fr; }
+  .scrub .legend { width: 100%; }
+  .top .dir { display: none; }
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 6v12l-8.5-6L11 6zm1 6l8.5 6V6L12 12z"/></svg>rewind</div>
+  <div class="dir" id="dir"></div>
+  <button class="icon-btn" id="theme" title="Toggle theme">Theme</button>
+</header>
+<div class="layout">
+  <aside>
+    <div class="search"><input id="filter" placeholder="Filter recordings" autocomplete="off" aria-label="Filter recordings"></div>
+    <div class="list" id="list"></div>
+  </aside>
+  <main id="main"></main>
+</div>
+<dialog id="dlg"></dialog>
+
+<script>
+'use strict';
+// ─── token & api ─────────────────────────────────────────────────────────────
+const store = {
+  get(k) { try { return sessionStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { sessionStorage.setItem(k, v); } catch {} },
+  lget(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  lset(k, v) { try { localStorage.setItem(k, v); } catch {} },
+};
+const qs = new URLSearchParams(location.search);
+let token = qs.get('token') || store.get('rewind-token') || '';
+if (qs.get('token')) { store.set('rewind-token', token); history.replaceState(null, '', location.pathname + location.hash); }
+
+async function api(path, opts = {}) {
+  const headers = { 'x-rewind-token': token };
+  if (opts.body) headers['content-type'] = 'application/json';
+  const r = await fetch('/api/' + path, { ...opts, headers });
+  let j = null;
+  try { j = await r.json(); } catch {}
+  if (!r.ok) throw new Error((j && j.error) || r.status + ' ' + r.statusText);
+  return j;
+}
+
+// ─── helpers ─────────────────────────────────────────────────────────────────
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const enc = encodeURIComponent;
+function compact(n) { const a = Math.abs(n); if (a >= 1e6) return (n / 1e6).toFixed(1) + 'M'; if (a >= 1e4) return Math.round(n / 1e3) + 'k'; if (a >= 1e3) return (n / 1e3).toFixed(1) + 'k'; return String(n); }
+function tokens(u) { if (!u) return ''; const i = u.input + u.cacheRead + u.cacheWrite; if (!i && !u.output) return ''; return compact(i) + ' in / ' + compact(u.output) + ' out'; }
+function ms(n) { if (n < 1000) return Math.round(n) + ' ms'; if (n < 60000) return (n / 1000).toFixed(1) + ' s'; return Math.floor(n / 60000) + 'm ' + Math.round((n % 60000) / 1000) + 's'; }
+function money(n) { if (n == null) return ''; return n > 0 && n < 0.01 ? '$' + n.toFixed(4) : '$' + n.toFixed(2); }
+function bytes(n) { if (n < 1024) return n + ' B'; if (n < 1048576) return (n / 1024).toFixed(1) + ' KB'; return (n / 1048576).toFixed(1) + ' MB'; }
+function ago(iso) { const s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000); if (s < 60) return 'just now'; if (s < 3600) return Math.floor(s / 60) + 'm ago'; if (s < 86400) return Math.floor(s / 3600) + 'h ago'; if (s < 2592000) return Math.floor(s / 86400) + 'd ago'; return iso.slice(0, 10); }
+function oneLine(s) { return String(s ?? '').replace(/\s+/g, ' ').trim(); }
+function signed(n, f) { return n > 0 ? '+' + f(n) : n < 0 ? '−' + f(-n) : f(0); }
+function preview(v, max = 80) { const s = v === undefined ? '(missing)' : (JSON.stringify(v) ?? String(v)); return s.length > max ? s.slice(0, max - 1) + '…' : s; }
+
+function pretty(v) {
+  if (v == null) return null;
+  if (typeof v === 'string') { try { return JSON.stringify(JSON.parse(v), null, 2); } catch { return v; } }
+  return JSON.stringify(v, null, 2);
+}
+// JSON syntax highlighting: tokenize the raw text, escape each piece.
+function highlight(text) {
+  if (text == null) return '<span class="muted">(none)</span>';
+  if (text.length > 400000 || !/^\s*[\[{]/.test(text)) return esc(text);
+  const re = /("(?:\\.|[^"\\])*")(\s*:)?|\b(true|false|null)\b|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/g;
+  let out = '', last = 0, m;
+  while ((m = re.exec(text))) {
+    out += esc(text.slice(last, m.index));
+    if (m[1]) out += m[2] ? '<span class="k">' + esc(m[1]) + '</span>' + esc(m[2]) : '<span class="s">' + esc(m[1]) + '</span>';
+    else if (m[3]) out += '<span class="l">' + m[3] + '</span>';
+    else out += '<span class="n">' + m[4] + '</span>';
+    last = re.lastIndex;
+  }
+  return out + esc(text.slice(last));
+}
+
+// ─── state & routing ─────────────────────────────────────────────────────────
+const state = { meta: null, recordings: [], filter: '', view: null, run: null, diff: null, sel: 0, tab: null, tabPref: null };
+
+function parseHash() {
+  const parts = location.hash.replace(/^#\/?/, '').split('/').map(decodeURIComponent);
+  if (parts[0] === 'run' && parts[1]) return { view: 'run', name: parts[1], sel: Number(parts[2] ?? 0) || 0 };
+  if (parts[0] === 'diff' && parts[1] && parts[2]) return { view: 'diff', a: parts[1], b: parts[2], sel: Number(parts[3] ?? -1) };
+  return { view: null };
+}
+function go(hash) { if (location.hash !== hash) location.hash = hash; else route(); }
+const runHash = (name, sel = 0) => '#/run/' + enc(name) + '/' + sel;
+const diffHash = (a, b, sel) => '#/diff/' + enc(a) + '/' + enc(b) + (sel != null && sel >= 0 ? '/' + sel : '');
+
+async function route() {
+  const h = parseHash();
+  try {
+    if (h.view === 'run') {
+      if (!state.run || state.run.name !== h.name || state.view !== 'run') {
+        state.run = await api('recordings/' + enc(h.name));
+        state.tabPref = null;
+      }
+      state.view = 'run';
+      state.sel = Math.min(Math.max(0, h.sel), Math.max(0, state.run.steps.length - 1));
+    } else if (h.view === 'diff') {
+      if (!state.diff || state.diff.a.name !== h.a || state.diff.b.name !== h.b || state.view !== 'diff') {
+        state.diff = await api('diff?a=' + enc(h.a) + '&b=' + enc(h.b));
+      }
+      state.view = 'diff';
+      state.sel = h.sel >= 0 ? h.sel : (state.diff.firstDivergence ?? 0);
+    } else {
+      state.view = null;
+    }
+  } catch (err) {
+    state.view = 'error';
+    state.error = err.message;
+  }
+  renderList();
+  renderMain();
+}
+
+// ─── sidebar ─────────────────────────────────────────────────────────────────
+function currentName() { return state.view === 'run' ? state.run?.name : state.view === 'diff' ? state.diff?.b.name : null; }
+function renderList() {
+  const f = state.filter.toLowerCase();
+  const rows = state.recordings.filter((r) => !f || r.name.toLowerCase().includes(f));
+  const cur = currentName();
+  $('#list').innerHTML = rows.length ? rows.map((r) => {
+    const t = r.totals;
+    const bits = [t.steps + (t.steps === 1 ? ' step' : ' steps'), t.llmCalls ? t.llmCalls + ' LLM' : null, tokens(t.usage) ? compact(t.usage.input + t.usage.cacheRead + t.usage.cacheWrite + t.usage.output) + ' tok' : null, t.cost != null ? money(t.cost) : null, ago(r.createdAt)].filter(Boolean);
+    return '<a class="rec' + (r.name === cur ? ' active' : '') + '" href="' + runHash(r.name) + '">' +
+      '<div class="name"><span style="overflow:hidden;text-overflow:ellipsis">' + esc(r.name) + '</span>' +
+      (r.fork ? '<span class="badge fork">fork</span>' : '') + (t.errors ? '<span class="badge err">' + t.errors + ' err</span>' : '') + '</div>' +
+      '<div class="sub">' + esc(bits.join(' · ')) + '</div></a>';
+  }).join('') : '<div class="muted" style="padding:12px">' + (state.recordings.length ? 'No match.' : 'No recordings yet.') + '</div>';
+}
+
+// ─── main ────────────────────────────────────────────────────────────────────
+function renderMain() {
+  const main = $('#main');
+  if (state.view === 'error') { main.innerHTML = '<div class="empty"><div><p class="error">' + esc(state.error) + '</p><p><a href="#/">Back</a></p></div></div>'; return; }
+  if (state.view === 'run') { main.innerHTML = renderRun(); afterRun(); return; }
+  if (state.view === 'diff') { main.innerHTML = renderDiff(); afterDiff(); return; }
+  main.innerHTML = state.recordings.length
+    ? '<div class="empty"><div><p>Pick a recording on the left.</p><p class="muted"><kbd>↑</kbd> <kbd>↓</kbd> move between steps · <kbd>f</kbd> fork from the selected step</p></div></div>'
+    : '<div class="empty"><div><p>No recordings in <code>' + esc(state.meta?.dir ?? '') + '</code></p><p class="muted">Record one with <code>await rewind.record(\'my-run\', () =&gt; agent())</code>, then it shows up here.</p></div></div>';
+}
+
+function kindOf(st) { return st.error || (st.status ?? 0) >= 400 ? 'err' : st.model ? 'llm' : 'tool'; }
+function statusText(st) { return st.error ? 'ERR' : st.status == null ? '…' : String(st.status) + (st.truncated ? '!' : ''); }
+
+function renderRun() {
+  const r = state.run, t = r.totals;
+  const total = Math.max(1, ...r.steps.map((s) => s.startedAt + s.durationMs));
+  const isFork = r.steps.some((s) => s.source);
+  const others = state.recordings.filter((x) => x.name !== r.name);
+  const compareDefault = r.fork ? r.fork.from : '';
+  const chips = [
+    '<b>' + t.steps + '</b> ' + (t.steps === 1 ? 'step' : 'steps'), '<b>' + t.llmCalls + '</b> LLM ' + (t.llmCalls === 1 ? 'call' : 'calls'),
+    tokens(t.usage) ? '<b>' + esc(tokens(t.usage)) + '</b> tokens' : null,
+    t.cost != null ? '<b>' + money(t.cost) + '</b>' : null,
+    '<b>' + ms(t.durationMs) + '</b>',
+    t.errors ? '<span class="error"><b>' + t.errors + '</b> failed</span>' : null,
+    'recorded ' + esc(ago(r.createdAt)),
+  ].filter(Boolean).map((c) => '<span class="stat">' + c + '</span>').join('');
+
+  let note = '';
+  if (r.fork) {
+    const f = r.fork;
+    note = '<div class="note">Fork of <a href="' + runHash(f.from, f.liveFrom ?? 0) + '">' + esc(f.from) + '</a>' +
+      (f.at != null ? ' at step ' + f.at : ' after the recording ran out') + ' · ' +
+      (f.liveFrom == null ? 'never went live' : f.reason === 'unmatched' ? '<span class="badge warn">went live early at #' + f.liveFrom + '</span> the run diverged' : 'live from #' + f.liveFrom) +
+      ' · <a href="' + diffHash(f.from, r.name, null) + '">compare with original</a></div>';
+  }
+
+  const rows = r.steps.map((s, i) => {
+    const k = kindOf(s);
+    const left = (s.startedAt / total) * 100, width = Math.max(0.4, (s.durationMs / total) * 100);
+    return '<div class="wf-row' + (i === state.sel ? ' sel' : '') + '" data-i="' + i + '" role="option" aria-selected="' + (i === state.sel) + '">' +
+      '<span class="seq">#' + s.seq + '</span>' +
+      '<span class="c-src">' + (s.source === 'live' ? '<span class="badge live">' + (s.patched ? 'L*' : 'L') + '</span>' : s.source === 'replayed' ? '<span class="badge">R</span>' : '') + '</span>' +
+      '<span>' + esc(s.method) + '</span>' +
+      '<span class="tgt" title="' + esc(s.url) + '">' + esc(s.host + s.path) + '</span>' +
+      '<span class="' + (k === 'err' ? 'st-bad' : '') + '">' + statusText(s) + '</span>' +
+      '<span class="c-model muted">' + esc(s.model ?? '') + '</span>' +
+      '<span class="c-tok muted">' + esc(tokens(s.usage)) + '</span>' +
+      '<span class="track" title="' + ms(s.startedAt) + ' → ' + ms(s.startedAt + s.durationMs) + '"><span class="bar ' + k + (s.source === 'replayed' ? ' replayed' : '') + '" style="left:' + left.toFixed(2) + '%;width:' + Math.min(width, 100 - left).toFixed(2) + '%"></span></span>' +
+      '</div>';
+  }).join('');
+
+  return '<div class="page">' +
+    '<div class="head"><div class="grow"><h1>' + esc(r.name) + '</h1><div class="stats">' + chips + '</div>' + note + '</div>' +
+    '<div class="actions"><select id="compare" aria-label="Compare with"><option value="">Compare with…</option>' +
+    others.map((o) => '<option value="' + esc(o.name) + '"' + (o.name === compareDefault ? ' data-suggest="1"' : '') + '>' + esc(o.name) + '</option>').join('') +
+    '</select></div></div>' +
+    '<div class="card">' +
+    '<div class="scrub"><input type="range" id="scrub" min="0" max="' + Math.max(0, r.steps.length - 1) + '" value="' + state.sel + '" aria-label="Scrub through steps">' +
+    '<span class="pos">step ' + (r.steps.length ? state.sel + 1 : 0) + ' / ' + r.steps.length + '</span>' +
+    '<span class="legend"><span><i style="background:var(--bar-llm)"></i>LLM</span><span><i style="background:var(--bar-tool)"></i>other</span><span><i style="background:var(--bar-err)"></i>failed</span>' + (isFork ? '<span><i style="background:var(--bar-tool);opacity:.45"></i>replayed</span>' : '') + '</span></div>' +
+    '<div class="wf" id="wf"><div class="wf-row head-row"><span>#</span><span class="c-src">' + (isFork ? 'src' : '') + '</span><span>method</span><span>target</span><span>status</span><span class="c-model">model</span><span class="c-tok">tokens</span><span>timeline · ' + ms(total) + '</span></div>' + rows + '</div>' +
+    '</div>' +
+    (r.steps.length ? '<div class="card detail" id="detail">' + renderStep(r.steps[state.sel]) + '</div>' : '<div class="empty">This recording has no requests.</div>') +
+    '</div>';
+}
+
+function renderStep(s) {
+  const tabs = [];
+  if (s.output != null) tabs.push(['output', 'Model output']);
+  tabs.push(['request', 'Request'], ['response', 'Response' + (s.chunks > 1 ? ' · ' + s.chunks + ' chunks' : '')], ['headers', 'Headers']);
+  // Keep the tab the user picked while it exists on this step; otherwise each step opens on its most useful tab.
+  state.tab = state.tabPref && tabs.some((t) => t[0] === state.tabPref) ? state.tabPref : tabs[0][0];
+
+  const meta = [
+    '<span class="' + (kindOf(s) === 'err' ? 'error' : '') + '">' + statusText(s) + '</span>', ms(s.durationMs), 'via ' + esc(s.via),
+    s.source ? '<span class="badge ' + (s.source === 'live' ? 'live' : '') + '">' + s.source + (s.patched ? ' · patched' : '') + '</span>' : null,
+    s.model ? '<span class="badge fork">' + esc(s.model) + '</span>' : null,
+    s.usage ? esc(s.usage.input.toLocaleString() + ' in / ' + s.usage.output.toLocaleString() + ' out' + (s.usage.cacheRead || s.usage.cacheWrite ? ' · cache ' + s.usage.cacheRead.toLocaleString() + ' read / ' + s.usage.cacheWrite.toLocaleString() + ' write' : '')) : null,
+    s.cost != null ? money(s.cost) : null,
+  ].filter(Boolean).join(' <span class="muted">·</span> ');
+
+  let body = '';
+  if (state.tab === 'output') body = '<div class="output">' + esc(s.output) + '</div>';
+  if (state.tab === 'request') body = '<pre class="code">' + highlight(pretty(s.requestBody)) + '</pre>';
+  if (state.tab === 'response') {
+    body = (s.error ? '<p class="error">' + esc(s.error) + '</p>' : '') + (s.truncatedReason ? '<p class="callout">Truncated: ' + esc(s.truncatedReason) + '</p>' : '') +
+      (s.responseText == null && s.responseBytes ? '<p class="muted">(' + bytes(s.responseBytes) + ' binary)</p>' : '<pre class="code">' + highlight(pretty(s.responseText)) + '</pre>');
+  }
+  if (state.tab === 'headers') {
+    const kv = (h) => h && Object.keys(h).length ? '<div class="kv">' + Object.entries(h).map(([k, v]) => '<span class="key">' + esc(k) + '</span><span>' + esc(v) + '</span>').join('') + '</div>' : '<p class="muted">(none)</p>';
+    body = '<div class="section-title">Request</div>' + kv(s.requestHeaders) + '<div class="section-title">Response</div>' + kv(s.responseHeaders);
+  }
+  return '<div class="detail-head"><div class="title">#' + s.seq + ' ' + esc(s.method) + ' ' + esc(s.url) + '</div>' +
+    '<button class="btn primary" id="fork-btn" title="Fork from this step (f)">Fork from here</button></div>' +
+    '<div class="detail-head" style="padding-top:8px;padding-bottom:8px"><div class="meta-line">' + meta + '</div></div>' +
+    '<div class="tabs" role="tablist">' + tabs.map(([k, l]) => '<button class="tab' + (k === state.tab ? ' on' : '') + '" data-tab="' + k + '" role="tab" aria-selected="' + (k === state.tab) + '">' + esc(l) + '</button>').join('') + '</div>' +
+    '<div class="tab-body">' + body + '</div>';
+}
+
+function selectStep(i, { scroll = true } = {}) {
+  const n = state.run.steps.length;
+  if (!n) return;
+  state.sel = Math.min(Math.max(0, i), n - 1);
+  history.replaceState(null, '', runHash(state.run.name, state.sel));
+  document.querySelectorAll('.wf-row[data-i]').forEach((el) => {
+    const on = Number(el.dataset.i) === state.sel;
+    el.classList.toggle('sel', on);
+    el.setAttribute('aria-selected', on);
+    if (on && scroll) el.scrollIntoView({ block: 'nearest' });
+  });
+  $('#scrub').value = state.sel;
+  $('.scrub .pos').textContent = 'step ' + (state.sel + 1) + ' / ' + n;
+  $('#detail').innerHTML = renderStep(state.run.steps[state.sel]);
+  bindDetail();
+}
+
+function afterRun() {
+  $('#wf').addEventListener('click', (e) => { const row = e.target.closest('.wf-row[data-i]'); if (row) selectStep(Number(row.dataset.i), { scroll: false }); });
+  $('#scrub').addEventListener('input', (e) => selectStep(Number(e.target.value)));
+  $('#compare').addEventListener('change', (e) => { if (e.target.value) go(diffHash(state.run.name, e.target.value)); });
+  bindDetail();
+  const sel = document.querySelector('.wf-row.sel');
+  if (sel) sel.scrollIntoView({ block: 'nearest' });
+}
+function bindDetail() {
+  document.querySelectorAll('.tab[data-tab]').forEach((b) => b.addEventListener('click', () => { state.tabPref = b.dataset.tab; $('#detail').innerHTML = renderStep(state.run.steps[state.sel]); bindDetail(); }));
+  const fb = $('#fork-btn');
+  if (fb) fb.addEventListener('click', () => openFork(state.run.steps[state.sel]));
+}
+
+// ─── diff ────────────────────────────────────────────────────────────────────
+function diffSummary(s) {
+  if (s.kind === 'same') return '';
+  if (s.kind === 'added' || s.kind === 'removed') { const st = s.a || s.b; return st.output ? oneLine(st.output) : (s.kind === 'added' ? 'only in b' : 'only in a'); }
+  if (s.request.length) { const r = s.request[0]; return r.path + ': ' + preview(r.left, 50) + ' → ' + preview(r.right, 50); }
+  if (s.a.output !== s.b.output && (s.a.output || s.b.output)) return 'output: ' + oneLine(s.a.output ?? '') + ' → ' + oneLine(s.b.output ?? '');
+  if (s.response.length) { const r = s.response[0]; return 'response ' + r.path + ': ' + preview(r.left, 40) + ' → ' + preview(r.right, 40); }
+  if (s.a.status !== s.b.status) return 'status ' + (s.a.status ?? s.a.error) + ' → ' + (s.b.status ?? s.b.error);
+  return 'response changed';
+}
+
+function renderDiff() {
+  const d = state.diff;
+  const names = state.recordings.map((r) => r.name);
+  const sel = (id, v) => '<select id="' + id + '">' + names.map((n) => '<option' + (n === v ? ' selected' : '') + ' value="' + esc(n) + '">' + esc(n) + '</option>').join('') + '</select>';
+  const c = d.counts;
+  const ua = d.a.totals.usage, ub = d.b.totals.usage;
+  const din = (ub.input + ub.cacheRead + ub.cacheWrite) - (ua.input + ua.cacheRead + ua.cacheWrite), dout = ub.output - ua.output;
+  const chips = [
+    '<b>' + c.same + '</b> same', '<b class="mark changed">' + c.changed + '</b> changed', '<b class="mark added">' + c.added + '</b> added', '<b class="mark removed">' + c.removed + '</b> removed',
+    tokens(ua) || tokens(ub) ? 'tokens <b>' + signed(din, compact) + '</b> in / <b>' + signed(dout, compact) + '</b> out' : null,
+    d.delta.cost != null ? 'cost <b>' + signed(d.delta.cost, money) + '</b>' : null,
+    'time <b>' + signed(d.delta.durationMs, ms) + '</b>',
+  ].filter(Boolean).map((x) => '<span class="stat">' + x + '</span>').join('');
+  const marks = { same: '=', changed: '~', added: '+', removed: '−' };
+
+  const rows = d.steps.map((s, i) =>
+    '<div class="drow ' + s.kind + (i === state.sel ? ' sel' : '') + '" data-i="' + i + '">' +
+    '<span class="seq">' + (s.a ? '#' + s.a.seq : '') + '</span><span class="seq">' + (s.b ? '#' + s.b.seq : '') + '</span>' +
+    '<span class="mark ' + s.kind + '">' + marks[s.kind] + '</span><span class="sig">' + esc((s.a || s.b).signature) + '</span>' +
+    (s.kind !== 'same' ? '<span class="sum">' + esc(diffSummary(s)) + '</span>' : '') + '</div>').join('');
+
+  return '<div class="page">' +
+    '<div class="head"><div class="grow"><h1>Compare runs</h1>' +
+    '<div class="actions" style="margin-top:10px;flex-wrap:wrap"><span class="del" style="font-weight:700">a</span>' + sel('pick-a', d.a.name) +
+    '<button class="btn" id="swap" title="Swap">⇄</button><span class="ins" style="font-weight:700">b</span>' + sel('pick-b', d.b.name) + '</div>' +
+    '<div class="stats">' + chips + '</div>' +
+    '<div class="note">' + (d.firstDivergence == null ? '<span class="ins">The runs are identical.</span>' : 'First divergence at <a href="#" id="jump">entry ' + (d.firstDivergence + 1) + '</a>') + '</div>' +
+    '</div></div>' +
+    '<div class="card"><div class="drows" id="drows">' + (rows || '<div class="empty">Both runs are empty.</div>') + '</div></div>' +
+    '<div class="card detail" id="ddetail">' + renderDiffDetail(d.steps[state.sel]) + '</div>' +
+    '</div>';
+}
+
+function renderDiffDetail(s) {
+  if (!s) return '<div class="tab-body muted">Select a row.</div>';
+  const side = (label, cls, st) => {
+    if (!st) return '<div><div class="side-label ' + cls + '">' + label + '</div><p class="muted">(no step)</p></div>';
+    return '<div><div class="side-label ' + cls + '">' + label + ' · #' + st.seq + ' · ' + statusText(st) + ' · ' + ms(st.durationMs) + (st.usage ? ' · ' + esc(tokens(st.usage)) : '') +
+      ' · <a href="' + runHash(label === 'a' ? state.diff.a.name : state.diff.b.name, st.seq) + '">open</a></div>' +
+      (st.output != null ? '<div class="section-title">Model output</div><div class="output">' + esc(st.output) + '</div>' : '') +
+      '<div class="section-title">Request body</div><pre class="code">' + highlight(pretty(st.requestBody)) + '</pre>' +
+      (st.output == null ? '<div class="section-title">Response body</div><pre class="code">' + highlight(pretty(st.responseText)) + '</pre>' : '') + '</div>';
+  };
+  let diffs = '';
+  if (s.kind === 'changed' && (s.request.length || s.response.length)) {
+    const line = (where, r) => '<div><span class="muted">' + where + '</span> ' + esc(r.path) + ': <span class="del">' + esc(preview(r.left, 160)) + '</span> → <span class="ins">' + esc(preview(r.right, 160)) + '</span></div>';
+    diffs = '<div class="section-title">Differences</div><div class="difflist">' + s.request.map((r) => line('request', r)).join('') + s.response.map((r) => line('response', r)).join('') + '</div><div style="height:12px"></div>';
+  }
+  const label = { same: 'Identical step', changed: 'Changed step', added: 'Only in b', removed: 'Only in a' }[s.kind];
+  return '<div class="detail-head"><div class="title">' + esc((s.a || s.b).signature) + '</div><span class="badge">' + label + '</span></div>' +
+    '<div class="tab-body">' + diffs + '<div class="sides">' + side('a', 'del', s.a) + side('b', 'ins', s.b) + '</div></div>';
+}
+
+function selectDiff(i, { scroll = true } = {}) {
+  const n = state.diff.steps.length;
+  if (!n) return;
+  state.sel = Math.min(Math.max(0, i), n - 1);
+  history.replaceState(null, '', diffHash(state.diff.a.name, state.diff.b.name, state.sel));
+  document.querySelectorAll('.drow[data-i]').forEach((el) => {
+    const on = Number(el.dataset.i) === state.sel;
+    el.classList.toggle('sel', on);
+    if (on && scroll) el.scrollIntoView({ block: 'nearest' });
+  });
+  $('#ddetail').innerHTML = renderDiffDetail(state.diff.steps[state.sel]);
+}
+
+function afterDiff() {
+  $('#drows').addEventListener('click', (e) => { const r = e.target.closest('.drow[data-i]'); if (r) selectDiff(Number(r.dataset.i), { scroll: false }); });
+  $('#pick-a').addEventListener('change', (e) => go(diffHash(e.target.value, state.diff.b.name)));
+  $('#pick-b').addEventListener('change', (e) => go(diffHash(state.diff.a.name, e.target.value)));
+  $('#swap').addEventListener('click', () => go(diffHash(state.diff.b.name, state.diff.a.name)));
+  const j = $('#jump');
+  if (j) j.addEventListener('click', (e) => { e.preventDefault(); selectDiff(state.diff.firstDivergence); });
+  const sel = document.querySelector('.drow.sel');
+  if (sel) sel.scrollIntoView({ block: 'nearest' });
+}
+
+// ─── fork dialog ─────────────────────────────────────────────────────────────
+function openFork(step) {
+  const r = state.run;
+  const dlg = $('#dlg');
+  const original = pretty(step.requestBody) ?? '';
+  const rootName = r.name;
+  if (!r.runnable) {
+    const snippet = "await rewind.fork('" + rootName.replace(/'/g, "\\'") + "', runAgent, { at: " + step.seq + ' });';
+    const config = "// rewind.config.mjs\nimport { runAgent } from './src/agent.js';\n\nexport default {\n  agents: {\n    '" + (r.fork ? r.fork.from : r.name).replace(/'/g, "\\'") + "': () => runAgent(),\n  },\n};";
+    dlg.innerHTML = '<div class="dlg-head"><h2>Fork from step #' + step.seq + '</h2><div class="muted">Steps before #' + step.seq + ' are replayed from the recording, and #' + step.seq + ' onward runs live.</div></div>' +
+      '<div class="dlg-body"><div class="section-title">Run it from your code</div><pre class="code">' + esc(snippet) + '</pre>' +
+      '<div class="section-title">Or fork right here</div><p class="muted" style="margin:0 0 8px">Tell the UI how to run this agent, then restart <code class="mono">npx rewind ui</code>:</p><pre class="code">' + esc(config) + '</pre></div>' +
+      '<div class="dlg-foot"><span class="msg muted" id="dlg-msg"></span><button class="btn" id="copy">Copy snippet</button><button class="btn primary" id="close">Close</button></div>';
+    dlg.showModal();
+    $('#close').onclick = () => dlg.close();
+    $('#copy').onclick = async () => { try { await navigator.clipboard.writeText(snippet); $('#dlg-msg').textContent = 'Copied.'; } catch { $('#dlg-msg').textContent = 'Copy failed; select the text instead.'; } };
+    return;
+  }
+  dlg.innerHTML = '<div class="dlg-head"><h2>Fork from step #' + step.seq + '</h2><div class="muted">Steps #0–#' + (step.seq - 1) + ' are replayed from <b>' + esc(r.name) + '</b>. Step #' + step.seq + ' and everything after runs <b>live</b>.</div></div>' +
+    '<div class="dlg-body"><p class="callout">Live steps call the real APIs and may cost money.</p>' +
+    '<div class="section-title">Request body for step #' + step.seq + ' <span class="muted" id="edited-flag"></span></div>' +
+    '<textarea class="edit" id="edit" spellcheck="false" aria-label="Request body">' + esc(original) + '</textarea>' +
+    '<p class="muted" style="font-size:12.5px;margin:6px 0 0">Edits replace this step\'s request only. The steps after it are built by your agent as usual.</p></div>' +
+    '<div class="dlg-foot"><span class="msg" id="dlg-msg"></span><button class="btn" id="cancel">Cancel</button><button class="btn primary" id="run">Run fork</button></div>';
+  dlg.showModal();
+  const ta = $('#edit');
+  ta.addEventListener('input', () => { $('#edited-flag').textContent = ta.value !== original ? '· edited' : ''; });
+  $('#cancel').onclick = () => dlg.close();
+  $('#run').onclick = async () => {
+    const edited = ta.value !== original;
+    if (edited && /^\s*[\[{]/.test(ta.value)) { try { JSON.parse(ta.value); } catch (e) { $('#dlg-msg').innerHTML = '<span class="error">Invalid JSON: ' + esc(e.message) + '</span>'; return; } }
+    $('#run').disabled = true; $('#cancel').disabled = true;
+    $('#dlg-msg').innerHTML = '<span class="muted">Running live steps…</span>';
+    try {
+      const res = await api('fork', { method: 'POST', body: JSON.stringify({ name: r.name, at: step.seq, body: edited ? ta.value : null }) });
+      dlg.close();
+      await refreshList();
+      go(diffHash(r.name, res.savedAs));
+    } catch (e) {
+      $('#dlg-msg').innerHTML = '<span class="error">' + esc(e.message) + '</span>';
+      $('#run').disabled = false; $('#cancel').disabled = false;
+    }
+  };
+}
+
+// ─── wiring ──────────────────────────────────────────────────────────────────
+async function refreshList() {
+  try { state.recordings = await api('recordings'); renderList(); } catch {}
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.target.closest('input, textarea, select, dialog[open]') || e.metaKey || e.ctrlKey || e.altKey) return;
+  const next = e.key === 'ArrowDown' || e.key === 'j', prev = e.key === 'ArrowUp' || e.key === 'k';
+  if (state.view === 'run' && state.run) {
+    if (next || prev) { e.preventDefault(); selectStep(state.sel + (next ? 1 : -1)); }
+    else if (e.key === 'f' && state.run.steps.length) { e.preventDefault(); openFork(state.run.steps[state.sel]); }
+  } else if (state.view === 'diff' && state.diff && (next || prev)) { e.preventDefault(); selectDiff(state.sel + (next ? 1 : -1)); }
+});
+$('#filter').addEventListener('input', (e) => { state.filter = e.target.value; renderList(); });
+$('#theme').addEventListener('click', () => {
+  const cur = document.documentElement.dataset.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  const nextTheme = cur === 'dark' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = nextTheme;
+  store.lset('rewind-theme', nextTheme);
+});
+const savedTheme = store.lget('rewind-theme');
+if (savedTheme === 'dark' || savedTheme === 'light') document.documentElement.dataset.theme = savedTheme;
+window.addEventListener('hashchange', route);
+
+(async function boot() {
+  try {
+    state.meta = await api('meta');
+    $('#dir').textContent = state.meta.dir + (state.meta.config ? '  ·  agents from ' + state.meta.config.split(/[\\/]/).pop() : '');
+    state.recordings = await api('recordings');
+  } catch (err) {
+    $('#main').innerHTML = '<div class="empty"><div><p class="error">' + esc(err.message) + '</p><p class="muted">Open the link printed by <code>npx rewind ui</code>; it includes the access token.</p></div></div>';
+    return;
+  }
+  if (!location.hash && state.recordings[0]) history.replaceState(null, '', runHash(state.recordings[0].name));
+  await route();
+  // Pick up recordings made while the UI is open (e.g. a test run).
+  setInterval(() => { if (document.visibilityState === 'visible') refreshList(); }, 4000);
+})();
+</script>
+</body>
+</html>

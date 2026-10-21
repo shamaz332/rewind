@@ -43,6 +43,11 @@ export interface FetchStep {
   source?: 'replayed' | 'live';
   /** In a fork recording: the request was changed by `patchRequest` before it was sent. */
   patched?: true;
+  /**
+   * Blob hash of the body that was actually sent, when `patchRequest` changed it. `request` keeps the
+   * original so unpatched code still replays the recording; this is what tools display and diff.
+   */
+  sentBody?: string;
   /** Milliseconds after the session started. */
   startedAt: number;
   durationMs: number;

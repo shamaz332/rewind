@@ -42,7 +42,7 @@ export function diffRecordings(ra: Recording, rb: Recording, pricing: Pricing | 
     const sa = i === null ? null : a.steps[i]!;
     const sb = j === null ? null : b.steps[j]!;
     if (sa && sb) {
-      const sameRequest = sa.matchKey === sb.matchKey;
+      const sameRequest = sa.matchKey === sb.matchKey && sa.sentHash === sb.sentHash;
       const sameResponse = sa.responseHash === sb.responseHash && sa.status === sb.status && sa.error === sb.error;
       if (sameRequest && sameResponse) steps.push({ kind: 'same', a: sa, b: sb });
       else
