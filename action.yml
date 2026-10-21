@@ -13,7 +13,7 @@ inputs:
     description: Name of the artifact holding the failed runs.
     default: rewind-failures
   version:
-    description: rewindjs version to run. Defaults to the one installed in the project, falling back to the latest.
+    description: llm-rewind version to run. Defaults to the one installed in the project, falling back to the latest.
     default: ''
   fail-on-divergence:
     description: Fail this step when a run diverged. Usually the test step has already failed, so this defaults to false.
@@ -36,11 +36,11 @@ runs:
       run: |
         set -euo pipefail
         if [ -n "$REWIND_VERSION" ]; then
-          cmd=(npx --yes "rewindjs@$REWIND_VERSION")
+          cmd=(npx --yes "llm-rewind@$REWIND_VERSION")
         elif [ -x node_modules/.bin/rewind ]; then
           cmd=(node_modules/.bin/rewind)
         else
-          cmd=(npx --yes rewindjs@latest)
+          cmd=(npx --yes llm-rewind@latest)
         fi
         "${cmd[@]}" report "$REWIND_PATH" >> "$GITHUB_STEP_SUMMARY"
         failures=$("${cmd[@]}" report "$REWIND_PATH" --json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).failures.length))')

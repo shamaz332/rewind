@@ -4,11 +4,11 @@
 Your agent failed at step 31. Replay it exactly, offline, for $0, as many times as you need.
 
 ```bash
-npm install -D rewindjs
+npm install -D llm-rewind
 ```
 
 ```ts
-import { rewind } from 'rewindjs';
+import { rewind } from 'llm-rewind';
 
 await rewind.record('checkout-bug', () => runAgent(input)); // real run, every request captured
 await rewind.replay('checkout-bug', () => runAgent(input)); // exact replay: no network, no cost
@@ -68,6 +68,8 @@ await rewind.fork('run', agent, {
 ```
 
 ## Inspect and compare runs
+
+The package installs a `rewind` command. In a project where `llm-rewind` is installed, run it with `npx rewind …`; to try it without installing, use `npx llm-rewind …`.
 
 ```bash
 npx rewind ls                              # every recording: steps, LLM calls, tokens, age
@@ -144,9 +146,9 @@ The UI listens on `127.0.0.1` only. It has no external requests or CDN, so it wo
 `recordTest` works like snapshots for agent runs. The first run records, and every run after replays: offline, in milliseconds, for $0.
 
 ```ts
-// vitest: import from 'rewindjs/vitest'   ·   jest: import from 'rewindjs/jest'
+// vitest: import from 'llm-rewind/vitest'   ·   jest: import from 'llm-rewind/jest'
 import { test, expect } from 'vitest';
-import { recordTest } from 'rewindjs/vitest';
+import { recordTest } from 'llm-rewind/vitest';
 
 test('books the cheapest flight', async () => {
   const run = await recordTest(() => agent.run('Book me a flight to Lisbon'));
@@ -165,7 +167,7 @@ test('books the cheapest flight', async () => {
 - **In CI, a missing recording fails the test** instead of quietly calling paid APIs.
 - When a replay diverges, rewind saves what the run actually did as `<name>.failed.rewind.json`. `npx rewind diff <name> <name>.failed` shows where it went off track.
 
-Importing `rewindjs/vitest` or `rewindjs/jest` registers the matchers (with TypeScript types). Outside tests, `rewind.capture(name, fn)` does the same as `recordTest`: it returns `{ value, recording, mode }`, and the matchers accept that.
+Importing `llm-rewind/vitest` or `llm-rewind/jest` registers the matchers (with TypeScript types). Outside tests, `rewind.capture(name, fn)` does the same as `recordTest`: it returns `{ value, recording, mode }`, and the matchers accept that.
 
 | Matcher | Passes when |
 |---|---|
@@ -247,10 +249,10 @@ Inside a session, rewind intercepts:
 Outside a session, every patched API behaves exactly like the original. Calls are attributed to a session through `AsyncLocalStorage`, so test runners and loggers calling `Date.now()` in the background never consume recorded values. `performance.now()`, timers and `crypto.getRandomValues()` are not touched.
 
 ## Important: import order
-rewind patches `globalThis.fetch` when it is imported. Some SDKs capture `fetch` when you construct a client, so **import `rewindjs` before you create your SDK clients**, or pass the fetch explicitly:
+rewind patches `globalThis.fetch` when it is imported. Some SDKs capture `fetch` when you construct a client, so **import `llm-rewind` before you create your SDK clients**, or pass the fetch explicitly:
 
 ```ts
-import { rewind } from 'rewindjs';
+import { rewind } from 'llm-rewind';
 const client = new Anthropic({ fetch: rewind.fetch });
 ```
 

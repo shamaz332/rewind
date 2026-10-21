@@ -1,5 +1,5 @@
 {
-  "name": "rewindjs",
+  "name": "llm-rewind",
   "version": "0.1.0",
   "description": "Record and deterministically replay AI agent runs. Debug the failure at step 31 without paying for steps 1-30 again.",
   "keywords": [

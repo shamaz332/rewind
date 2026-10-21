@@ -4,7 +4,7 @@ import { summarize, type RecordingSummary } from './inspect.js';
 import type { AutoOptions, Recording } from './types.js';
 
 /**
- * Framework-agnostic matchers. `rewindjs/vitest` and `rewindjs/jest` register them with `expect.extend`.
+ * Framework-agnostic matchers. `llm-rewind/vitest` and `llm-rewind/jest` register them with `expect.extend`.
  * Each accepts a `Run` from `capture()`/`recordTest()`, a `Recording`, or a `RecordingSummary`.
  */
 

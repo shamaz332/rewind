@@ -10,7 +10,7 @@ interface JestExpect {
 function jestExpect(): JestExpect {
   const e = (globalThis as { expect?: JestExpect }).expect;
   if (!e || typeof e.extend !== 'function') {
-    throw new Error('rewindjs/jest must be imported inside Jest (e.g. from setupFilesAfterEach or a test file).');
+    throw new Error('llm-rewind/jest must be imported inside Jest (e.g. from setupFilesAfterEach or a test file).');
   }
   return e;
 }

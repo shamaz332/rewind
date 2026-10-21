@@ -8,7 +8,7 @@ import type { Plugin } from 'esbuild';
 const selfImport: Plugin = {
   name: 'rewind-self-import',
   setup(build) {
-    build.onResolve({ filter: /^\.\/index\.js$/ }, () => ({ path: 'rewindjs', external: true }));
+    build.onResolve({ filter: /^\.\/index\.js$/ }, () => ({ path: 'llm-rewind', external: true }));
   },
 };
 
@@ -27,7 +27,7 @@ export default defineConfig([
     dts: true,
     sourcemap: true,
     target: 'node18',
-    external: ['vitest', 'rewindjs'],
+    external: ['vitest', 'llm-rewind'],
     esbuildPlugins: [selfImport],
   },
   {

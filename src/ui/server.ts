@@ -25,7 +25,7 @@ export interface UiOptions {
   configPath?: string;
   /** For tests: agents to use instead of loading a config file. */
   agents?: AgentMap;
-  /** For tests: where to get `fork` from. Default: the rewindjs build next to this CLI. */
+  /** For tests: where to get `fork` from. Default: the llm-rewind build next to this CLI. */
   loadFork?: () => Promise<ForkFn>;
   /** Fixed token, for tests. Default: random per launch. */
   token?: string;
@@ -245,7 +245,7 @@ async function loadConfig(path?: string): Promise<{ agents: AgentMap; path: stri
 }
 
 /**
- * Fork through the rewindjs build next to this CLI. When the CLI runs from a project's
+ * Fork through the llm-rewind build next to this CLI. When the CLI runs from a project's
  * node_modules, that is the same module instance the project's own code imports, so both
  * share one set of patches and one session context.
  */
